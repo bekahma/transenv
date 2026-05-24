@@ -14,6 +14,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from framework.data_return import return_cefr_texts
+from framework.transformation import introduces_blank
 from utils.cefr_texts import (
     INTERNAL_EMPTY_TEXT_COLUMN,
     INTERNAL_ROW_INDEX_COLUMN,
@@ -113,7 +114,7 @@ Line two."""
         self.assertEqual(extract_transformed_sentence("**Transformed Sentence:**\n"), "No change")
 
     def test_sentence_chunking_preserves_separators(self):
-        chunks = split_text_chunks("Hello there.  How are you?\nFine.", max_chunk_words=80)
+        chunks = split_text_chunks("Hello there.  How are you?\nFine.", mode="sentence", max_chunk_words=80)
 
         self.assertEqual(
             chunks,
@@ -125,11 +126,27 @@ Line two."""
         )
 
     def test_sentence_chunking_splits_long_sentences(self):
-        chunks = split_text_chunks("one two three four five six.", max_chunk_words=3)
+        chunks = split_text_chunks("one two three four five six.", mode="sentence", max_chunk_words=3)
 
         self.assertEqual(len(chunks), 2)
         self.assertEqual(chunks[0]["text"], "one two three")
         self.assertEqual(chunks[1]["text"], "four five six.")
+
+    def test_hybrid_chunking_keeps_short_rows_whole(self):
+        chunks = split_text_chunks("Short row. Has two sentences.", mode="hybrid", sentence_chunk_min_words=100)
+
+        self.assertEqual(chunks, [{"text": "Short row. Has two sentences.", "separator": ""}])
+
+    def test_hybrid_chunking_splits_long_rows(self):
+        text = " ".join(["word"] * 101) + ". Next sentence."
+        chunks = split_text_chunks(text, mode="hybrid", sentence_chunk_min_words=100)
+
+        self.assertGreater(len(chunks), 1)
+        self.assertEqual(chunks[-1]["text"], "Next sentence.")
+
+    def test_detects_newly_introduced_blank(self):
+        self.assertTrue(introduces_blank("This is fine.", "This is <blank>."))
+        self.assertFalse(introduces_blank("This is <blank>.", "This is <blank>."))
 
     def test_aggregates_chunk_results(self):
         chunks = [

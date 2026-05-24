@@ -61,13 +61,16 @@ def _split_long_chunk(text, separator, max_chunk_words):
     return chunks
 
 
-def split_text_chunks(text, mode="sentence", max_chunk_words=80):
+def split_text_chunks(text, mode="hybrid", max_chunk_words=80, sentence_chunk_min_words=100):
     text = _normalize_text(text)
 
     if mode == "row":
         return [{"text": text, "separator": ""}] if text.strip() else []
-    if mode != "sentence":
-        raise ValueError("--text_chunking must be either 'sentence' or 'row'")
+    if mode == "hybrid":
+        if count_words(text) <= sentence_chunk_min_words:
+            return [{"text": text, "separator": ""}] if text.strip() else []
+    elif mode != "sentence":
+        raise ValueError("--text_chunking must be one of 'hybrid', 'sentence', or 'row'")
 
     chunks = []
     for match in SENTENCE_PATTERN.finditer(text):

@@ -190,6 +190,7 @@ def main():
                     value,
                     mode=dataset_config.text_chunking,
                     max_chunk_words=dataset_config.max_chunk_words,
+                    sentence_chunk_min_words=dataset_config.sentence_chunk_min_words,
                 )
 
                 if not chunks:

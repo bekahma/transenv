@@ -5,6 +5,10 @@ from registry.prompt import *
 from utils.guidline_utils import *
 
 
+def introduces_blank(orig_sentence, transformed_sentence):
+    return '<blank>' not in orig_sentence and '<blank>' in transformed_sentence
+
+
 
 def framework_application(guideline, task):
     guideline = guideline[1]
@@ -72,6 +76,8 @@ def transformation(sentence, guideline, client, tokenizer, sampling_params, task
 
             transformed_sentence = extract_transformed_sentence(response.text)
             if not transformed_sentence.strip() or ('no change' in transformed_sentence.lower()):
+                continue
+            if introduces_blank(orig_sentence[num], transformed_sentence):
                 continue
 
             else:
@@ -180,6 +186,8 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
             transformed_sentence = extract_transformed_sentence(response)
 
             if not transformed_sentence.strip() or ('no change' in transformed_sentence.lower()):
+                continue
+            if introduces_blank(orig_sentence[num], transformed_sentence):
                 continue
 
             mid_transformed_sentences[num].append(transformed_sentence)
