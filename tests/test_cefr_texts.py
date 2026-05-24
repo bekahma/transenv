@@ -23,6 +23,7 @@ from utils.cefr_texts import (
     load_cefr_text_dataset,
     parse_cefr_levels,
 )
+from utils.guidline_utils import extract_transformed_sentence
 
 
 FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -96,6 +97,18 @@ class CefrTextsTest(unittest.TestCase):
     def test_requires_text_column_when_ambiguous(self):
         with self.assertRaisesRegex(ValueError, "Pass --text_column"):
             detect_text_column(["title", "body"])
+
+    def test_extracts_multiline_transformed_sentence(self):
+        response = """Phase 1: applicable
+
+**Transformed Sentence:**
+Line one.
+Line two."""
+
+        self.assertEqual(extract_transformed_sentence(response), "Line one.\nLine two.")
+
+    def test_empty_transformed_sentence_is_no_change(self):
+        self.assertEqual(extract_transformed_sentence("**Transformed Sentence:**\n"), "No change")
 
     def test_saves_appended_audit_columns(self):
         config = dataset_config(

@@ -14,15 +14,17 @@ def extract_transformed_sentence(text):
     Returns:
         str: The transformed sentence, or a message if no transformed sentence is found.
     """
-    # Define a regular expression pattern to find the transformed sentence
-    pattern = r"\*\*Transformed Sentence:\*\* (.*)"
+    # Capture both one-line outputs and passage-style outputs where the
+    # transformed text starts on the next line after the marker.
+    pattern = r"\*\*Transformed Sentence:\*\*\s*(.*)"
     
     # Search for the pattern in the text
-    match = re.search(pattern, text)
+    match = re.search(pattern, text, flags=re.DOTALL)
     
     # Return the transformed sentence if found, otherwise return a message
     if match:
-        return match.group(1).strip()
+        transformed_sentence = match.group(1).strip()
+        return transformed_sentence if transformed_sentence else 'No change'
     else:
         return 'No change'
     

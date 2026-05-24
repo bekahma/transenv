@@ -71,7 +71,7 @@ def transformation(sentence, guideline, client, tokenizer, sampling_params, task
                 continue
 
             transformed_sentence = extract_transformed_sentence(response.text)
-            if ('no change' in transformed_sentence.lower()) or transformed_sentence.lower() is None:
+            if not transformed_sentence.strip() or ('no change' in transformed_sentence.lower()):
                 continue
 
             else:
@@ -179,7 +179,7 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
 
             transformed_sentence = extract_transformed_sentence(response)
 
-            if ('no change' in transformed_sentence.lower()) or transformed_sentence.lower() is None:
+            if not transformed_sentence.strip() or ('no change' in transformed_sentence.lower()):
                 continue
 
             mid_transformed_sentences[num].append(transformed_sentence)
