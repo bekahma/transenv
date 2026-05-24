@@ -29,6 +29,7 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     applied_rules = []
     num_applied_rules = []
     is_changed = []
+    chunk_counts = []
 
     for output in outputs:
         orig_sentence = output.get('orig_sentence', '')
@@ -40,12 +41,14 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
         applied_rules.append(json.dumps(rules, ensure_ascii=False))
         num_applied_rules.append(len(rules))
         is_changed.append(final_sentence != orig_sentence)
+        chunk_counts.append(output.get('chunk_count', 1))
 
     source_df['orig_sentence'] = orig_sentences
     source_df['transformed_text'] = transformed_texts
     source_df['applied_rules'] = applied_rules
     source_df['num_applied_rules'] = num_applied_rules
     source_df['is_changed'] = is_changed
+    source_df['chunk_count'] = chunk_counts
 
     if '__transenv_row_idx' in source_df.columns:
         source_df = source_df.drop(columns=['__transenv_row_idx'])

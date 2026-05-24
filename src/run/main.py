@@ -15,8 +15,10 @@ from utils import log, colorstr
 from utils.common import save_func
 from utils.cefr_texts import (
     INTERNAL_EMPTY_TEXT_COLUMN,
+    aggregate_chunk_results,
     empty_transformation_result,
     load_cefr_text_dataset,
+    split_text_chunks,
 )
 from utils.model_utils import return_model, uses_hosted_openai
 from utils.filesys_utils import pickle_load, pickle_save
@@ -61,6 +63,20 @@ def _load_dataset(*args, **kwargs):
         raise ImportError("The Hugging Face datasets package is required. Install it with `pip install -r requirements-openai.txt`.") from exc
 
     return load_dataset(*args, **kwargs)
+
+
+def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size):
+    results = []
+
+    for start_idx in range(0, len(sentences), batch_size):
+        batch = sentences[start_idx:start_idx + batch_size]
+        if use_hosted_openai:
+            batch_results = openai_transformation(batch, guideline, client, sampling_params, task_config, model_config)
+        else:
+            batch_results = transformation(batch, guideline, client, tokenizer, sampling_params, task_config, model_config)
+        results.extend(batch_results)
+
+    return results
 
 
 
@@ -163,20 +179,36 @@ def main():
         if dataset_config.dataset_name == 'cefr_texts':
             sentence = _as_batch_list(sentence)
             empty_mask = _as_batch_list(sample[INTERNAL_EMPTY_TEXT_COLUMN])
-
-            transform_indices = [idx for idx, is_empty in enumerate(empty_mask) if not is_empty]
             transformed_batch = [None for _ in range(len(sentence))]
 
-            if transform_indices:
-                transform_sentence = [sentence[idx] for idx in transform_indices]
+            for idx, value in enumerate(sentence):
+                if empty_mask[idx]:
+                    transformed_batch[idx] = empty_transformation_result(value)
+                    continue
 
-                if use_hosted_openai:
-                    transformed_results = openai_transformation(transform_sentence, guideline, client, sampling_params, task_config, model_config)
-                else:
-                    transformed_results = transformation(transform_sentence, guideline, client, tokenizer, sampling_params, task_config, model_config)
+                chunks = split_text_chunks(
+                    value,
+                    mode=dataset_config.text_chunking,
+                    max_chunk_words=dataset_config.max_chunk_words,
+                )
 
-                for idx, output in zip(transform_indices, transformed_results):
-                    transformed_batch[idx] = output
+                if not chunks:
+                    transformed_batch[idx] = empty_transformation_result(value)
+                    continue
+
+                chunk_sentences = [chunk["text"] for chunk in chunks]
+                chunk_results = _transform_sentences(
+                    chunk_sentences,
+                    guideline,
+                    client,
+                    tokenizer,
+                    sampling_params,
+                    task_config,
+                    model_config,
+                    use_hosted_openai,
+                    generation_config.batch_size,
+                )
+                transformed_batch[idx] = aggregate_chunk_results(value, chunks, chunk_results)
 
             for idx, value in enumerate(sentence):
                 if transformed_batch[idx] is None:

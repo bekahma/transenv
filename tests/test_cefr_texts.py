@@ -18,10 +18,12 @@ from utils.cefr_texts import (
     INTERNAL_EMPTY_TEXT_COLUMN,
     INTERNAL_ROW_INDEX_COLUMN,
     INTERNAL_TEXT_COLUMN,
+    aggregate_chunk_results,
     detect_text_column,
     empty_transformation_result,
     load_cefr_text_dataset,
     parse_cefr_levels,
+    split_text_chunks,
 )
 from utils.guidline_utils import extract_transformed_sentence
 
@@ -110,6 +112,55 @@ Line two."""
     def test_empty_transformed_sentence_is_no_change(self):
         self.assertEqual(extract_transformed_sentence("**Transformed Sentence:**\n"), "No change")
 
+    def test_sentence_chunking_preserves_separators(self):
+        chunks = split_text_chunks("Hello there.  How are you?\nFine.", max_chunk_words=80)
+
+        self.assertEqual(
+            chunks,
+            [
+                {"text": "Hello there.", "separator": "  "},
+                {"text": "How are you?", "separator": "\n"},
+                {"text": "Fine.", "separator": ""},
+            ],
+        )
+
+    def test_sentence_chunking_splits_long_sentences(self):
+        chunks = split_text_chunks("one two three four five six.", max_chunk_words=3)
+
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0]["text"], "one two three")
+        self.assertEqual(chunks[1]["text"], "four five six.")
+
+    def test_aggregates_chunk_results(self):
+        chunks = [
+            {"text": "Hello there.", "separator": " "},
+            {"text": "How are you?", "separator": ""},
+        ]
+        results = [
+            {
+                "final_sentence": "Hello there.",
+                "whole_response": ["r1"],
+                "mid_transformed_sentences": [],
+                "judge_repsonse": [],
+                "applied_rules": [],
+                "transformed_sentences": [],
+            },
+            {
+                "final_sentence": "How you?",
+                "whole_response": ["r2"],
+                "mid_transformed_sentences": ["How you?"],
+                "judge_repsonse": ["no"],
+                "applied_rules": ["MISSING VERB"],
+                "transformed_sentences": ["How you?"],
+            },
+        ]
+
+        aggregated = aggregate_chunk_results("Hello there. How are you?", chunks, results)
+
+        self.assertEqual(aggregated["final_sentence"], "Hello there. How you?")
+        self.assertEqual(aggregated["applied_rules"], ["MISSING VERB"])
+        self.assertEqual(aggregated["chunk_count"], 2)
+
     def test_saves_appended_audit_columns(self):
         config = dataset_config(
             os.path.join(FIXTURE_DIR, "cefr_texts_levels.csv"),
@@ -143,6 +194,7 @@ Line two."""
         self.assertIn("applied_rules", saved.columns)
         self.assertIn("num_applied_rules", saved.columns)
         self.assertIn("is_changed", saved.columns)
+        self.assertIn("chunk_count", saved.columns)
         self.assertEqual(saved.loc[0, "transformed_text"], "I likes apples.")
         self.assertEqual(json.loads(saved.loc[0, "applied_rules"]), ["SUBJECT VERB AGREEMENT"])
         self.assertEqual(saved.loc[0, "num_applied_rules"], 1)

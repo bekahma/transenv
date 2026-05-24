@@ -32,6 +32,8 @@ class DatasetConfig:
     input_path: str = field(default=None, metadata={"help": "Local CSV input path for cefr_texts"})
     text_column: str = field(default=None, metadata={"help": "Text column in a cefr_texts CSV"})
     input_cefr_levels: str = field(default=None, metadata={"help": "Comma-separated input CEFR levels to keep, e.g. A1,A2"})
+    text_chunking: str = field(default="sentence", metadata={"help": "cefr_texts chunking mode: sentence or row"})
+    max_chunk_words: int = field(default=80, metadata={"help": "Split sentence chunks longer than this many words"})
 
     
 

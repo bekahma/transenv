@@ -1,4 +1,5 @@
 import os
+import re
 
 import pandas as pd
 
@@ -15,6 +16,9 @@ CEFR_LEVEL_GROUPS = {
     "C": ("C1", "C2"),
 }
 
+SENTENCE_PATTERN = re.compile(r"(.+?(?:[.!?]+[\"')\]]*|$))(\s*)", re.DOTALL)
+WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?")
+
 
 def _normalize_name(value):
     return str(value).strip().lower()
@@ -26,6 +30,93 @@ def _normalize_text(value):
     if pd.isna(value):
         return ""
     return str(value)
+
+
+def count_words(text):
+    return len(WORD_PATTERN.findall(_normalize_text(text)))
+
+
+def _split_long_chunk(text, separator, max_chunk_words):
+    if max_chunk_words is None or max_chunk_words <= 0 or count_words(text) <= max_chunk_words:
+        return [{"text": text, "separator": separator}]
+
+    chunks = []
+    current_tokens = []
+    current_words = 0
+
+    for token in re.findall(r"\S+\s*", text):
+        current_tokens.append(token)
+        current_words += count_words(token)
+
+        if current_words >= max_chunk_words:
+            chunks.append({"text": "".join(current_tokens).strip(), "separator": " "})
+            current_tokens = []
+            current_words = 0
+
+    if current_tokens:
+        chunks.append({"text": "".join(current_tokens).strip(), "separator": separator})
+    elif chunks:
+        chunks[-1]["separator"] = separator
+
+    return chunks
+
+
+def split_text_chunks(text, mode="sentence", max_chunk_words=80):
+    text = _normalize_text(text)
+
+    if mode == "row":
+        return [{"text": text, "separator": ""}] if text.strip() else []
+    if mode != "sentence":
+        raise ValueError("--text_chunking must be either 'sentence' or 'row'")
+
+    chunks = []
+    for match in SENTENCE_PATTERN.finditer(text):
+        chunk_text = match.group(1)
+        separator = match.group(2)
+        if not chunk_text:
+            continue
+        if not chunk_text.strip():
+            continue
+        chunks.extend(_split_long_chunk(chunk_text.strip(), separator, max_chunk_words))
+
+    return chunks
+
+
+def aggregate_chunk_results(orig_sentence, chunks, chunk_results):
+    final_sentence = "".join(
+        f"{result.get('final_sentence', chunks[idx]['text'])}{chunks[idx]['separator']}"
+        for idx, result in enumerate(chunk_results)
+    )
+
+    applied_rules = []
+    seen_rules = set()
+    whole_responses = []
+    mid_transformed_sentences = []
+    judge_responses = []
+    transformed_sentences = []
+
+    for result in chunk_results:
+        whole_responses.extend(result.get("whole_response", []))
+        mid_transformed_sentences.extend(result.get("mid_transformed_sentences", []))
+        judge_responses.extend(result.get("judge_repsonse", []))
+        transformed_sentences.extend(result.get("transformed_sentences", []))
+
+        for rule in result.get("applied_rules", result.get("applied_rule", [])):
+            if rule not in seen_rules:
+                seen_rules.add(rule)
+                applied_rules.append(rule)
+
+    return {
+        "orig_sentence": _normalize_text(orig_sentence),
+        "whole_response": whole_responses,
+        "mid_transformed_sentences": mid_transformed_sentences,
+        "judge_repsonse": judge_responses,
+        "applied_rules": applied_rules,
+        "transformed_sentences": transformed_sentences,
+        "final_sentence": final_sentence,
+        "chunk_count": len(chunks),
+        "chunk_results": chunk_results,
+    }
 
 
 def parse_cefr_levels(levels):
