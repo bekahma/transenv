@@ -7,9 +7,19 @@ from utils import colorstr
 from utils.filesys_utils import json_load
 
 
+def _require_file(path, message):
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"{message} Missing file: {path}")
+
+
 
 def dialect_feature(dialect, data_path):
-    ewave = pd.read_csv(os.path.join(data_path, 'ewave/ewave.csv'))
+    ewave_path = os.path.join(data_path, 'ewave/ewave.csv')
+    _require_file(
+        ewave_path,
+        "english_dialect requires --data_path to point at a root containing assets/ and ewave/ewave.csv.",
+    )
+    ewave = pd.read_csv(ewave_path)
     linguistic_features = ewave[(ewave['Language_ID'] == dialect) & (ewave['Value'] == 'A')]['Parameter_ID'].tolist()
     return linguistic_features
 
@@ -39,6 +49,10 @@ def cefr_feature(cefr_level):
 def return_guideline(task_config, dataset_name, data_path):
     if (task_config.task_name == 'english_dialect') & (task_config.dialect is not None):
         file_path = os.path.join(data_path, 'assets/guidelines/orig_generated_guideline_wo_example.json')
+        _require_file(
+            file_path,
+            "english_dialect requires --data_path to point at a root containing assets/ and ewave/ewave.csv.",
+        )
         guideline = json_load(file_path)
         linguistic_features = dialect_feature(dialect=task_config.dialect.strip("'\""), data_path=data_path)
 

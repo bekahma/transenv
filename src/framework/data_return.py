@@ -1,8 +1,10 @@
 import os
+import json
 import numpy as np
 import pandas as pd
 
 from registry.dataset_map import  DATASET_MAPPING
+from utils.cefr_texts import load_cefr_text_frame
 
 
 
@@ -11,6 +13,45 @@ def return_dataloader(dataset_config, generation_config, start_idx=None):
     if generation_config.rerun is not None:
         rerun_index = list(np.load(generation_config.rerun))
     return DATASET_MAPPING[dataset_config.dataset_name](generation_config.batch_size, rerun_index, start_idx)
+
+
+def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
+    rerun_index = None
+    if generation_config.rerun is not None:
+        rerun_index = list(np.load(generation_config.rerun))
+
+    source_df = load_cefr_text_frame(dataset_config, rerun_index)
+    outputs = to_save.get('question', [])
+    source_df = source_df.iloc[:len(outputs)].copy()
+
+    orig_sentences = []
+    transformed_texts = []
+    applied_rules = []
+    num_applied_rules = []
+    is_changed = []
+
+    for output in outputs:
+        orig_sentence = output.get('orig_sentence', '')
+        final_sentence = output.get('final_sentence', orig_sentence)
+        rules = output.get('applied_rules', output.get('applied_rule', []))
+
+        orig_sentences.append(orig_sentence)
+        transformed_texts.append(final_sentence)
+        applied_rules.append(json.dumps(rules, ensure_ascii=False))
+        num_applied_rules.append(len(rules))
+        is_changed.append(final_sentence != orig_sentence)
+
+    source_df['orig_sentence'] = orig_sentences
+    source_df['transformed_text'] = transformed_texts
+    source_df['applied_rules'] = applied_rules
+    source_df['num_applied_rules'] = num_applied_rules
+    source_df['is_changed'] = is_changed
+
+    if '__transenv_row_idx' in source_df.columns:
+        source_df = source_df.drop(columns=['__transenv_row_idx'])
+
+    suffix = '_rerun' if generation_config.rerun is not None else ''
+    source_df.to_csv(os.path.join(save_config.save_path, f'{save_config.file_name}{suffix}.csv'), index=False)
 
 
 

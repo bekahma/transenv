@@ -15,16 +15,22 @@ class GenerationConfig:
 
 @dataclass
 class ModelConfig:
-    model_name: str = field(default="google/gemma-2-27b-it", metadata={"help": "Model to Use", "choices": ['google/gemma-2-27b-it', 'gpt-4o-mini']})
-    port_num: int = field(default=8000, metadata={"help": "vLLM port number"})
+    model_name: str = field(default="google/gemma-2-27b-it", metadata={"help": "Model to Use", "choices": ['google/gemma-2-27b-it', 'gpt-4.1-mini', 'gpt-4o-mini']})
+    model_provider: str = field(default="auto", metadata={"help": "Model provider: auto, local, or openai"})
+    port_num: int = field(default=8000, metadata={"help": "vLLM port number for local provider"})
     tokenizer: str = field(default='google/gemma-2-27b-it')
+    openai_base_url: str = field(default=None, metadata={"help": "Optional OpenAI-compatible base URL for hosted OpenAI provider"})
+    semantic_model_name: str = field(default=None, metadata={"help": "Optional model for semantic checking; defaults to model_name"})
 
 
 
 @dataclass
 class DatasetConfig:
-    dataset_name: str = field(metadata={"help": "Dataset name", "choices": ['mmlu', 'gsm8k', 'arc', 'hellaswag', 'truthfulqa', 'winogrande']})
+    dataset_name: str = field(metadata={"help": "Dataset name", "choices": ['mmlu', 'gsm8k', 'arc', 'hellaswag', 'truthfulqa', 'winogrande', 'cefr_texts']})
     sampling: bool = field(default=False, metadata={"action": "store_true"})
+    input_path: str = field(default=None, metadata={"help": "Local CSV input path for cefr_texts"})
+    text_column: str = field(default=None, metadata={"help": "Text column in a cefr_texts CSV"})
+    input_cefr_levels: str = field(default=None, metadata={"help": "Comma-separated input CEFR levels to keep, e.g. A1,A2"})
 
     
 

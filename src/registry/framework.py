@@ -6,6 +6,7 @@ QUESTION_KEY_ID = {
     'hellaswag': 'ctx',
     'truthfulqa': 'question',
     'winogrande': 'sentence',
+    'cefr_texts': '__transenv_text',
 }
 
 CHOICE_KEY_ID = {

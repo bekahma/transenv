@@ -126,59 +126,95 @@ def openai_framework_application(guideline, task):
 
 
 def openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config):
-    sentence = sentence[0]
+    """
+    Hosted chat-completion transformation.
+
+    sentence: list of strings where list size is equal to batch size.
+    """
+
+    if type(sentence) is tuple:
+        sentence = list(sentence)
+    elif type(sentence) is str:
+        sentence = [sentence]
+
     orig_sentence = copy.deepcopy(sentence)
 
-    whole_response = list()
-    applied_rule = list()
-    transformed_sentences = list()
+    whole_responses = [[] for _ in range(len(sentence))]
+    applied_rules = [[] for _ in range(len(sentence))]
+    mid_transformed_sentences = [[] for _ in range(len(sentence))]
+    judge_responses = [[] for _ in range(len(sentence))]
+    transformed_sentences = [[] for _ in range(len(sentence))]
 
     random.shuffle(guideline)
 
-    exception_count = 0
+    transformation_params = {
+        'temperature': sampling_params['temperature'],
+        'top_p': sampling_params['top_p'],
+        'max_tokens': sampling_params['max_tokens'],
+    }
+    semantic_model_name = model_config.semantic_model_name or model_config.model_name
 
     for i in range(len(guideline)):
         feature = guideline[i][0]
         input_prompt = openai_framework_application(guideline=guideline[i], task=task_config.task_name)
-        input_prompt = input_prompt + [{"role": 'user', "content": f"**Original Sentence:** {sentence}"}]
 
-        try:
-            responses = client.chat.completions.create(
-                model=model_config.model_name,
-                messages=input_prompt,
-                **sampling_params
-            )
+        for num in range(len(sentence)):
+            prompt = input_prompt + [{"role": 'user', "content": f"**Original Sentence:** {sentence[num]}"}]
+
+            try:
+                responses = client.chat.completions.create(
+                    model=model_config.model_name,
+                    messages=prompt,
+                    **transformation_params
+                )
+            except Exception as e:
+                whole_responses[num].append(str(e))
+                continue
 
             response = responses.choices[0].message.content
-            whole_response.append(response)
+            whole_responses[num].append(response)
 
             if response is None:
                 continue
 
             transformed_sentence = extract_transformed_sentence(response)
-            
 
             if ('no change' in transformed_sentence.lower()) or transformed_sentence.lower() is None:
                 continue
 
-            else:
-                sentence = transformed_sentence
-                applied_rule.append(feature)
-                transformed_sentences.append(transformed_sentence)
+            mid_transformed_sentences[num].append(transformed_sentence)
 
-        except Exception as e:
-            exception_count += 1
-            continue
+            semantic_input_prompt = semantic_check(orig_sentence[num], transformed_sentence)
+            try:
+                semantic_response = client.chat.completions.create(
+                    model=semantic_model_name,
+                    messages=[{'role': 'user', 'content': semantic_input_prompt}],
+                    temperature=0,
+                    max_tokens=10,
+                )
+            except Exception as e:
+                judge_responses[num].append(str(e).lower())
+                continue
 
-    if exception_count == len(guideline):
-        sentence = orig_sentence
+            judge_response = semantic_response.choices[0].message.content.lower()
+            judge_responses[num].append(judge_response)
+
+            if 'no' in judge_response:
+                sentence[num] = transformed_sentence
+                applied_rules[num].append(feature)
+                transformed_sentences[num].append(transformed_sentence)
     
-    iter_result = [{
-        'orig_sentence': orig_sentence,
-        'whole_response': whole_response,
-        'applied_rule': applied_rule,
-        'transformed_sentences': transformed_sentences,
-        'final_sentence': sentence
-    }]
+    iter_result = list()
+
+    for num in range(len(sentence)):
+        iter_result.append({
+            'orig_sentence': orig_sentence[num],
+            'whole_response': whole_responses[num],
+            'mid_transformed_sentences': mid_transformed_sentences[num],
+            'judge_repsonse': judge_responses[num],
+            'applied_rules': applied_rules[num],
+            'transformed_sentences': transformed_sentences[num],
+            'final_sentence': sentence[num]
+        })
 
     return iter_result
