@@ -13,10 +13,13 @@ This repository is the official implementation of Trans-EnV.
 ## Requirements 🛠️
 To install requirements:
 ```bash
+# Lightweight requirements for local CSV transformation with hosted OpenAI models
+pip install -r requirements-openai.txt
+
 # PyTorch install (CUDA 12.1)
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 
-# Requirements
+# Full requirements for local vLLM/Gemini evaluation workflows
 pip install -r requirements.txt
 ```
 

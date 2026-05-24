@@ -1,5 +1,5 @@
 google-ai-generativelanguage==0.6.15
-google-api-core==2.25.0rc0
+google-api-core==2.25.0
 google-api-python-client==2.168.0
 google-auth==2.39.0
 google-auth-httplib2==0.2.0

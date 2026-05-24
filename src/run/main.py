@@ -4,11 +4,7 @@ sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 import re
 import numpy as np
 from tqdm import tqdm
-from datasets import load_dataset
 from collections import defaultdict
-from transformers import AutoTokenizer
-
-from torch.utils.data import DataLoader
 
 from configs.parse_arguments import parse_args
 from framework.guideline import return_guideline
@@ -36,6 +32,35 @@ def _as_batch_list(value):
     if type(value) is list:
         return value
     return [value]
+
+
+def _batch_dataset(dataset, batch_size):
+    column_names = dataset.column_names
+    for start_idx in range(0, len(dataset), batch_size):
+        rows = dataset[start_idx:start_idx + batch_size]
+        yield {column: rows[column] for column in column_names}
+
+
+def _torch_dataloader(dataset, batch_size):
+    from torch.utils.data import DataLoader
+
+    return DataLoader(dataset, batch_size, shuffle=False)
+
+
+def _load_tokenizer(model_config):
+    from transformers import AutoTokenizer
+
+    tokenizer_name = model_config.tokenizer or model_config.model_name
+    return AutoTokenizer.from_pretrained(tokenizer_name, cache_dir=os.environ.get("MODEL_DIR", None))
+
+
+def _load_dataset(*args, **kwargs):
+    try:
+        from datasets import load_dataset
+    except Exception as exc:
+        raise ImportError("The Hugging Face datasets package is required. Install it with `pip install -r requirements-openai.txt`.") from exc
+
+    return load_dataset(*args, **kwargs)
 
 
 
@@ -66,8 +91,7 @@ def main():
     use_hosted_openai = uses_hosted_openai(model_config)
     tokenizer = None
     if use_hosted_openai is False:
-        tokenizer_name = model_config.tokenizer or model_config.model_name
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, cache_dir=os.environ.get("MODEL_DIR", None))
+        tokenizer = _load_tokenizer(model_config)
 
     # Guideline
     guideline = return_guideline(task_config=task_config, dataset_name=dataset_config.dataset_name, data_path=save_config.data_path)
@@ -90,10 +114,10 @@ def main():
             generation_config=generation_config,
             start_idx=start_idx,
         )
-        dataloader = DataLoader(dataset, generation_config.batch_size, shuffle=False)
+        dataloader = _batch_dataset(dataset, generation_config.batch_size)
 
     elif task_config.task_name == 'cefr':
-        dataset = load_dataset(
+        dataset = _load_dataset(
             "csv",
             data_files = {"test": f'{save_config.data_path}/assets/vocab_processed/{dataset_config.dataset_name}_{(task_config.cefr_level).lower()}.csv'},
             split="test",
@@ -103,13 +127,13 @@ def main():
             rerun_index = list(np.load(generation_config.rerun))
             dataset = dataset.select(rerun_index)
 
-        dataloader = DataLoader(dataset, generation_config.batch_size, shuffle=False)
+        dataloader = _torch_dataloader(dataset, generation_config.batch_size)
 
 
     elif task_config.task_name == 'L1':
         cefr_data_path = ('/').join(save_config.save_path.split('/')[:-2])
 
-        dataset = load_dataset(
+        dataset = _load_dataset(
             "csv",  
             data_files={"test": f'{cefr_data_path}/assets/cefr/{dataset_config.dataset_name}/{task_config.cefr_level}.csv'},
             split='test',
@@ -119,7 +143,7 @@ def main():
             rerun_index = list(np.load(generation_config.rerun))
             dataset = dataset.select(rerun_index)
     
-        dataloader = DataLoader(dataset, generation_config.batch_size, shuffle=False)
+        dataloader = _torch_dataloader(dataset, generation_config.batch_size)
 
     elif task_config.task_name == 'english_dialect':
         dataloader = return_dataloader(dataset_config=dataset_config, generation_config=generation_config, start_idx=start_idx)
