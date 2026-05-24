@@ -8,6 +8,7 @@ class GenerationConfig:
     top_p: float = field(default=0.95, metadata={"help": "top_p value for generation"})
     batch_size: int = field(default=30, metadata={"help": "batch size for generation"})
     max_tokens: int = field(default=2000)
+    max_samples: int = field(default=None, metadata={"help": "Maximum number of input rows to transform after filtering"})
     rerun: str = field(default=None)
     one_transform: bool = field(default=False, metadata={"action": "store_true"})
 

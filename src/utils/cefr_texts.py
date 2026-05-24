@@ -146,6 +146,12 @@ def load_cefr_text_dataset(dataset_config, generation_config, start_idx=0):
 
         dataset = dataset.select(list(np.load(generation_config.rerun)))
 
+    max_samples = getattr(generation_config, "max_samples", None)
+    if max_samples is not None:
+        if max_samples < 0:
+            raise ValueError("--max_samples must be greater than or equal to 0")
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+
     if start_idx:
         dataset = dataset.skip(start_idx)
 

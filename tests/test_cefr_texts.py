@@ -46,8 +46,8 @@ def dataset_config(input_path, text_column=None, input_cefr_levels=None):
     )
 
 
-def generation_config(batch_size=2, rerun=None):
-    return SimpleNamespace(batch_size=batch_size, rerun=rerun)
+def generation_config(batch_size=2, rerun=None, max_samples=None):
+    return SimpleNamespace(batch_size=batch_size, rerun=rerun, max_samples=max_samples)
 
 
 class CefrTextsTest(unittest.TestCase):
@@ -75,6 +75,19 @@ class CefrTextsTest(unittest.TestCase):
         self.assertEqual(dataset[1][INTERNAL_ROW_INDEX_COLUMN], 1)
         self.assertEqual(dataset[2][INTERNAL_ROW_INDEX_COLUMN], 3)
         self.assertTrue(dataset[2][INTERNAL_EMPTY_TEXT_COLUMN])
+
+    @unittest.skipUnless(has_hf_datasets(), "Hugging Face datasets is not installed")
+    def test_limits_max_samples_after_filtering(self):
+        config = dataset_config(
+            os.path.join(FIXTURE_DIR, "cefr_texts_levels.csv"),
+            text_column="text",
+            input_cefr_levels="A1,A2",
+        )
+        dataset = load_cefr_text_dataset(config, generation_config(max_samples=2))
+
+        self.assertEqual(len(dataset), 2)
+        self.assertEqual(dataset[0][INTERNAL_ROW_INDEX_COLUMN], 0)
+        self.assertEqual(dataset[1][INTERNAL_ROW_INDEX_COLUMN], 1)
 
     def test_cefr_group_shorthand(self):
         self.assertEqual(parse_cefr_levels("A"), {"A1", "A2"})
