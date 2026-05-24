@@ -156,3 +156,7 @@ wandb/
 
 logs_dialect/
 logs_l1/
+
+
+# CEFR related
+logs/
