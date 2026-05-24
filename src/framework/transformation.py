@@ -9,6 +9,10 @@ def introduces_blank(orig_sentence, transformed_sentence):
     return '<blank>' not in orig_sentence and '<blank>' in transformed_sentence
 
 
+def _rule_budget_reached(applied_rules, max_rules):
+    return max_rules is not None and len(applied_rules) >= max_rules
+
+
 
 def framework_application(guideline, task):
     guideline = guideline[1]
@@ -27,7 +31,7 @@ def framework_application(guideline, task):
 
 
 
-def transformation(sentence, guideline, client, tokenizer, sampling_params, task_config, model_config):
+def transformation(sentence, guideline, client, tokenizer, sampling_params, task_config, model_config, max_rules_per_chunk=None):
     """
     sentence (list of string) where list size is equal to batch size
     """
@@ -50,7 +54,17 @@ def transformation(sentence, guideline, client, tokenizer, sampling_params, task
         feature = guideline[i][0]
         input_prompt = framework_application(guideline=guideline[i], task=task_config.task_name)
 
-        batch_input = [input_prompt + [{"role": 'user', "content": f"**Original Sentence:** {s}"}] for s in sentence]
+        active_indices = [
+            idx for idx in range(len(sentence))
+            if not _rule_budget_reached(applied_rules[idx], max_rules_per_chunk)
+        ]
+        if not active_indices:
+            continue
+
+        batch_input = [
+            input_prompt + [{"role": 'user', "content": f"**Original Sentence:** {sentence[idx]}"}]
+            for idx in active_indices
+        ]
         chat_batch_input = list()
 
         for input in batch_input:
@@ -67,7 +81,8 @@ def transformation(sentence, guideline, client, tokenizer, sampling_params, task
             **sampling_params
             )
         
-        for num, response in enumerate(responses.choices):
+        for response_idx, response in enumerate(responses.choices):
+            num = active_indices[response_idx]
             # save all responses
             whole_responses[num].append(response.text)
 
@@ -131,7 +146,7 @@ def openai_framework_application(guideline, task):
 
 
 
-def openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config):
+def openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config, max_rules_per_chunk=None):
     """
     Hosted chat-completion transformation.
 
@@ -165,6 +180,9 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
         input_prompt = openai_framework_application(guideline=guideline[i], task=task_config.task_name)
 
         for num in range(len(sentence)):
+            if _rule_budget_reached(applied_rules[num], max_rules_per_chunk):
+                continue
+
             prompt = input_prompt + [{"role": 'user', "content": f"**Original Sentence:** {sentence[num]}"}]
 
             try:

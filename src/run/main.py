@@ -65,24 +65,139 @@ def _load_dataset(*args, **kwargs):
     return load_dataset(*args, **kwargs)
 
 
-def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size):
+def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None):
     results = []
 
     for start_idx in range(0, len(sentences), batch_size):
         batch = sentences[start_idx:start_idx + batch_size]
         if use_hosted_openai:
-            batch_results = openai_transformation(batch, guideline, client, sampling_params, task_config, model_config)
+            batch_results = openai_transformation(batch, guideline, client, sampling_params, task_config, model_config, max_rules_per_chunk=max_rules_per_chunk)
         else:
-            batch_results = transformation(batch, guideline, client, tokenizer, sampling_params, task_config, model_config)
+            batch_results = transformation(batch, guideline, client, tokenizer, sampling_params, task_config, model_config, max_rules_per_chunk=max_rules_per_chunk)
         results.extend(batch_results)
 
     return results
+
+
+def _get_applied_rules(result):
+    return list(result.get("applied_rules", result.get("applied_rule", [])) or [])
+
+
+def _count_rule_applications(result):
+    return len(_get_applied_rules(result))
+
+
+def _min_rule_limit(*limits):
+    active_limits = [limit for limit in limits if limit is not None]
+    if not active_limits:
+        return None
+    return min(active_limits)
+
+
+def _limit_result_to_rule_budget(result, chunk_text, max_rules):
+    if max_rules is None:
+        return result
+
+    rules = _get_applied_rules(result)
+    if len(rules) <= max_rules:
+        return result
+    if max_rules <= 0:
+        return empty_transformation_result(chunk_text)
+
+    transformed_sentences = result.get("transformed_sentences", [])
+    if len(transformed_sentences) < max_rules:
+        return empty_transformation_result(chunk_text)
+
+    limited_result = dict(result)
+    limited_rules = rules[:max_rules]
+    limited_transformed_sentences = transformed_sentences[:max_rules]
+
+    limited_result["applied_rules"] = limited_rules
+    if "applied_rule" in limited_result:
+        limited_result["applied_rule"] = limited_rules
+    limited_result["transformed_sentences"] = limited_transformed_sentences
+    limited_result["final_sentence"] = limited_transformed_sentences[-1]
+    limited_result["rule_limit_truncated"] = True
+
+    return limited_result
+
+
+def _trim_results_to_row_rule_budget(chunk_results, chunks, max_rules_per_row):
+    if max_rules_per_row is None:
+        return chunk_results
+
+    remaining_rules = max_rules_per_row
+    trimmed_results = []
+
+    for idx, result in enumerate(chunk_results):
+        if remaining_rules <= 0:
+            trimmed_results.append(empty_transformation_result(chunks[idx]["text"]))
+            continue
+
+        limited_result = _limit_result_to_rule_budget(result, chunks[idx]["text"], remaining_rules)
+        remaining_rules -= _count_rule_applications(limited_result)
+        trimmed_results.append(limited_result)
+
+    return trimmed_results
+
+
+def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None):
+    chunk_sentences = [chunk["text"] for chunk in chunks]
+
+    if max_rules_per_row is None:
+        return _transform_sentences(
+            chunk_sentences,
+            guideline,
+            client,
+            tokenizer,
+            sampling_params,
+            task_config,
+            model_config,
+            use_hosted_openai,
+            batch_size,
+            max_rules_per_chunk=max_rules_per_chunk,
+        )
+
+    chunk_results = []
+    remaining_rules = max_rules_per_row
+
+    for chunk in chunks:
+        if remaining_rules <= 0:
+            chunk_results.append(empty_transformation_result(chunk["text"]))
+            continue
+
+        chunk_rule_budget = _min_rule_limit(max_rules_per_chunk, remaining_rules)
+        result = _transform_sentences(
+            [chunk["text"]],
+            guideline,
+            client,
+            tokenizer,
+            sampling_params,
+            task_config,
+            model_config,
+            use_hosted_openai,
+            1,
+            max_rules_per_chunk=chunk_rule_budget,
+        )[0]
+        result = _limit_result_to_rule_budget(result, chunk["text"], remaining_rules)
+        remaining_rules -= _count_rule_applications(result)
+        chunk_results.append(result)
+
+    return chunk_results
+
+
+def _validate_generation_limits(generation_config):
+    for name in ("max_samples", "max_rules_per_chunk", "max_rules_per_row"):
+        value = getattr(generation_config, name, None)
+        if value is not None and value < 0:
+            raise ValueError(f"--{name} must be greater than or equal to 0")
 
 
 
 def main():
     # Initialize arguments
     generation_config, model_config, dataset_config, task_config, save_config = parse_args()
+    _validate_generation_limits(generation_config)
 
     if dataset_config.dataset_name is None:
         raise AssertionError(colorstr('red', 'Dataset name should be specified!'))
@@ -197,9 +312,8 @@ def main():
                     transformed_batch[idx] = empty_transformation_result(value)
                     continue
 
-                chunk_sentences = [chunk["text"] for chunk in chunks]
-                chunk_results = _transform_sentences(
-                    chunk_sentences,
+                chunk_results = _transform_cefr_chunks(
+                    chunks,
                     guideline,
                     client,
                     tokenizer,
@@ -208,6 +322,8 @@ def main():
                     model_config,
                     use_hosted_openai,
                     generation_config.batch_size,
+                    max_rules_per_chunk=generation_config.max_rules_per_chunk,
+                    max_rules_per_row=generation_config.max_rules_per_row,
                 )
                 transformed_batch[idx] = aggregate_chunk_results(value, chunks, chunk_results)
 
@@ -220,9 +336,9 @@ def main():
             sentence = [re.sub(r'_{2,}', '<blank>', s) for s in sentence]
 
             if use_hosted_openai:
-                iter_result = openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config)
+                iter_result = openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config, max_rules_per_chunk=generation_config.max_rules_per_chunk)
             else:
-                iter_result = transformation(sentence, guideline, client, tokenizer, sampling_params, task_config, model_config)
+                iter_result = transformation(sentence, guideline, client, tokenizer, sampling_params, task_config, model_config, max_rules_per_chunk=generation_config.max_rules_per_chunk)
 
         to_save.extend(iter_result)
 
@@ -230,7 +346,7 @@ def main():
 
             # choices transform
             for choice_num, sentence in enumerate(sample['choices']['text']):
-                iter_result = transformation(sentence, guideline, client, tokenizer, sampling_params, task_config, model_config)
+                iter_result = transformation(sentence, guideline, client, tokenizer, sampling_params, task_config, model_config, max_rules_per_chunk=generation_config.max_rules_per_chunk)
                 to_save_choice[choice_num].extend(iter_result)
 
             to_save_dict = {

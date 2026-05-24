@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 import pandas as pd
@@ -15,6 +16,7 @@ if SRC_DIR not in sys.path:
 
 from framework.data_return import return_cefr_texts
 from framework.transformation import introduces_blank
+from run import main as run_main
 from utils.cefr_texts import (
     INTERNAL_EMPTY_TEXT_COLUMN,
     INTERNAL_ROW_INDEX_COLUMN,
@@ -177,6 +179,116 @@ Line two."""
         self.assertEqual(aggregated["final_sentence"], "Hello there. How you?")
         self.assertEqual(aggregated["applied_rules"], ["MISSING VERB"])
         self.assertEqual(aggregated["chunk_count"], 2)
+
+    def test_aggregates_repeated_rule_applications(self):
+        chunks = [
+            {"text": "One.", "separator": " "},
+            {"text": "Two.", "separator": ""},
+        ]
+        results = [
+            {
+                "final_sentence": "One changed.",
+                "whole_response": [],
+                "mid_transformed_sentences": [],
+                "judge_repsonse": [],
+                "applied_rules": ["OMISSION OF PREPOSITION"],
+                "transformed_sentences": ["One changed."],
+            },
+            {
+                "final_sentence": "Two changed.",
+                "whole_response": [],
+                "mid_transformed_sentences": [],
+                "judge_repsonse": [],
+                "applied_rules": ["OMISSION OF PREPOSITION"],
+                "transformed_sentences": ["Two changed."],
+            },
+        ]
+
+        aggregated = aggregate_chunk_results("One. Two.", chunks, results)
+
+        self.assertEqual(
+            aggregated["applied_rules"],
+            ["OMISSION OF PREPOSITION", "OMISSION OF PREPOSITION"],
+        )
+
+    def test_row_rule_budget_trims_across_chunks(self):
+        chunks = [
+            {"text": "One.", "separator": " "},
+            {"text": "Two.", "separator": " "},
+            {"text": "Three.", "separator": ""},
+        ]
+        results = [
+            {
+                "final_sentence": "One changed.",
+                "applied_rules": ["R1"],
+                "transformed_sentences": ["One changed."],
+            },
+            {
+                "final_sentence": "Two changed twice.",
+                "applied_rules": ["R2", "R3"],
+                "transformed_sentences": ["Two changed once.", "Two changed twice."],
+            },
+            {
+                "final_sentence": "Three changed.",
+                "applied_rules": ["R4"],
+                "transformed_sentences": ["Three changed."],
+            },
+        ]
+
+        trimmed = run_main._trim_results_to_row_rule_budget(results, chunks, max_rules_per_row=2)
+        aggregated = aggregate_chunk_results("One. Two. Three.", chunks, trimmed)
+
+        self.assertEqual(trimmed[0]["applied_rules"], ["R1"])
+        self.assertEqual(trimmed[1]["applied_rules"], ["R2"])
+        self.assertEqual(trimmed[1]["final_sentence"], "Two changed once.")
+        self.assertEqual(trimmed[2]["applied_rules"], [])
+        self.assertEqual(aggregated["final_sentence"], "One changed. Two changed once. Three.")
+        self.assertEqual(aggregated["applied_rules"], ["R1", "R2"])
+
+    def test_chunk_and_row_rule_budgets_stop_later_chunks(self):
+        chunks = [
+            {"text": "One.", "separator": " "},
+            {"text": "Two.", "separator": " "},
+            {"text": "Three.", "separator": ""},
+        ]
+        seen_chunk_budgets = []
+
+        def fake_transform(sentences, *args, **kwargs):
+            self.assertEqual(len(sentences), 1)
+            seen_chunk_budgets.append(kwargs["max_rules_per_chunk"])
+            text = sentences[0]
+            return [
+                {
+                    "orig_sentence": text,
+                    "final_sentence": f"{text} changed",
+                    "whole_response": [],
+                    "mid_transformed_sentences": [],
+                    "judge_repsonse": [],
+                    "applied_rules": [f"rule:{text}"],
+                    "transformed_sentences": [f"{text} changed"],
+                }
+            ]
+
+        with patch.object(run_main, "_transform_sentences", side_effect=fake_transform):
+            results = run_main._transform_cefr_chunks(
+                chunks,
+                guideline=[],
+                client=None,
+                tokenizer=None,
+                sampling_params={},
+                task_config=None,
+                model_config=None,
+                use_hosted_openai=True,
+                batch_size=5,
+                max_rules_per_chunk=1,
+                max_rules_per_row=2,
+            )
+
+        self.assertEqual(seen_chunk_budgets, [1, 1])
+        self.assertEqual(results[0]["applied_rules"], ["rule:One."])
+        self.assertEqual(results[1]["applied_rules"], ["rule:Two."])
+        self.assertEqual(results[2]["final_sentence"], "Three.")
+        self.assertEqual(results[2]["applied_rules"], [])
 
     def test_saves_appended_audit_columns(self):
         config = dataset_config(

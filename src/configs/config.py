@@ -9,6 +9,8 @@ class GenerationConfig:
     batch_size: int = field(default=30, metadata={"help": "batch size for generation"})
     max_tokens: int = field(default=2000)
     max_samples: int = field(default=None, metadata={"help": "Maximum number of input rows to transform after filtering"})
+    max_rules_per_chunk: int = field(default=None, metadata={"help": "Maximum accepted feature rules per transformed chunk"})
+    max_rules_per_row: int = field(default=None, metadata={"help": "Maximum accepted feature-rule applications per cefr_texts row"})
     rerun: str = field(default=None)
     one_transform: bool = field(default=False, metadata={"action": "store_true"})
 

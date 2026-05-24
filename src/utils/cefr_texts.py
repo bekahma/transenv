@@ -92,7 +92,6 @@ def aggregate_chunk_results(orig_sentence, chunks, chunk_results):
     )
 
     applied_rules = []
-    seen_rules = set()
     whole_responses = []
     mid_transformed_sentences = []
     judge_responses = []
@@ -104,10 +103,7 @@ def aggregate_chunk_results(orig_sentence, chunks, chunk_results):
         judge_responses.extend(result.get("judge_repsonse", []))
         transformed_sentences.extend(result.get("transformed_sentences", []))
 
-        for rule in result.get("applied_rules", result.get("applied_rule", [])):
-            if rule not in seen_rules:
-                seen_rules.add(rule)
-                applied_rules.append(rule)
+        applied_rules.extend(result.get("applied_rules", result.get("applied_rule", [])))
 
     return {
         "orig_sentence": _normalize_text(orig_sentence),
