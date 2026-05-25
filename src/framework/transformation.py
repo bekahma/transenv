@@ -13,6 +13,12 @@ def _rule_budget_reached(applied_rules, max_rules):
     return max_rules is not None and len(applied_rules) >= max_rules
 
 
+def _rule_usage_cap_reached(feature, rule_usage_counts, max_rule_applications_per_rule):
+    if rule_usage_counts is None or max_rule_applications_per_rule is None:
+        return False
+    return rule_usage_counts.get(feature, 0) >= max_rule_applications_per_rule
+
+
 
 def framework_application(guideline, task):
     guideline = guideline[1]
@@ -31,7 +37,7 @@ def framework_application(guideline, task):
 
 
 
-def transformation(sentence, guideline, client, tokenizer, sampling_params, task_config, model_config, max_rules_per_chunk=None):
+def transformation(sentence, guideline, client, tokenizer, sampling_params, task_config, model_config, max_rules_per_chunk=None, rule_usage_counts=None, max_rule_applications_per_rule=None):
     """
     sentence (list of string) where list size is equal to batch size
     """
@@ -52,6 +58,9 @@ def transformation(sentence, guideline, client, tokenizer, sampling_params, task
 
     for i in range(len(guideline)):
         feature = guideline[i][0]
+        if _rule_usage_cap_reached(feature, rule_usage_counts, max_rule_applications_per_rule):
+            continue
+
         input_prompt = framework_application(guideline=guideline[i], task=task_config.task_name)
 
         active_indices = [
@@ -109,8 +118,12 @@ def transformation(sentence, guideline, client, tokenizer, sampling_params, task
                 judge_responses[num].append(semantic_response.choices[0].message.content.lower())
 
                 if 'no' in semantic_response.choices[0].message.content.lower():
+                    if _rule_usage_cap_reached(feature, rule_usage_counts, max_rule_applications_per_rule):
+                        continue
                     sentence[num] = transformed_sentence
                     applied_rules[num].append(feature)
+                    if rule_usage_counts is not None:
+                        rule_usage_counts[feature] += 1
                     transformed_sentences[num].append(transformed_sentence)
         
     iter_result = list()
@@ -146,7 +159,7 @@ def openai_framework_application(guideline, task):
 
 
 
-def openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config, max_rules_per_chunk=None):
+def openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config, max_rules_per_chunk=None, rule_usage_counts=None, max_rule_applications_per_rule=None):
     """
     Hosted chat-completion transformation.
 
@@ -177,6 +190,9 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
 
     for i in range(len(guideline)):
         feature = guideline[i][0]
+        if _rule_usage_cap_reached(feature, rule_usage_counts, max_rule_applications_per_rule):
+            continue
+
         input_prompt = openai_framework_application(guideline=guideline[i], task=task_config.task_name)
 
         for num in range(len(sentence)):
@@ -226,8 +242,12 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
             judge_responses[num].append(judge_response)
 
             if 'no' in judge_response:
+                if _rule_usage_cap_reached(feature, rule_usage_counts, max_rule_applications_per_rule):
+                    continue
                 sentence[num] = transformed_sentence
                 applied_rules[num].append(feature)
+                if rule_usage_counts is not None:
+                    rule_usage_counts[feature] += 1
                 transformed_sentences[num].append(transformed_sentence)
     
     iter_result = list()

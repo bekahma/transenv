@@ -1,10 +1,10 @@
 import os, sys
-sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
 import re
 import numpy as np
 from tqdm import tqdm
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from configs.parse_arguments import parse_args
 from framework.guideline import return_guideline
@@ -65,15 +65,36 @@ def _load_dataset(*args, **kwargs):
     return load_dataset(*args, **kwargs)
 
 
-def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None):
+def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, rule_usage_counts=None, max_rule_applications_per_rule=None):
     results = []
 
     for start_idx in range(0, len(sentences), batch_size):
         batch = sentences[start_idx:start_idx + batch_size]
         if use_hosted_openai:
-            batch_results = openai_transformation(batch, guideline, client, sampling_params, task_config, model_config, max_rules_per_chunk=max_rules_per_chunk)
+            batch_results = openai_transformation(
+                batch,
+                guideline,
+                client,
+                sampling_params,
+                task_config,
+                model_config,
+                max_rules_per_chunk=max_rules_per_chunk,
+                rule_usage_counts=rule_usage_counts,
+                max_rule_applications_per_rule=max_rule_applications_per_rule,
+            )
         else:
-            batch_results = transformation(batch, guideline, client, tokenizer, sampling_params, task_config, model_config, max_rules_per_chunk=max_rules_per_chunk)
+            batch_results = transformation(
+                batch,
+                guideline,
+                client,
+                tokenizer,
+                sampling_params,
+                task_config,
+                model_config,
+                max_rules_per_chunk=max_rules_per_chunk,
+                rule_usage_counts=rule_usage_counts,
+                max_rule_applications_per_rule=max_rule_applications_per_rule,
+            )
         results.extend(batch_results)
 
     return results
@@ -141,7 +162,7 @@ def _trim_results_to_row_rule_budget(chunk_results, chunks, max_rules_per_row):
     return trimmed_results
 
 
-def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None):
+def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, rule_usage_counts=None, max_rule_applications_per_rule=None):
     chunk_sentences = [chunk["text"] for chunk in chunks]
 
     if max_rules_per_row is None:
@@ -156,6 +177,8 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             use_hosted_openai,
             batch_size,
             max_rules_per_chunk=max_rules_per_chunk,
+            rule_usage_counts=rule_usage_counts,
+            max_rule_applications_per_rule=max_rule_applications_per_rule,
         )
 
     chunk_results = []
@@ -178,6 +201,8 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             use_hosted_openai,
             1,
             max_rules_per_chunk=chunk_rule_budget,
+            rule_usage_counts=rule_usage_counts,
+            max_rule_applications_per_rule=max_rule_applications_per_rule,
         )[0]
         result = _limit_result_to_rule_budget(result, chunk["text"], remaining_rules)
         remaining_rules -= _count_rule_applications(result)
@@ -187,10 +212,41 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
 
 
 def _validate_generation_limits(generation_config):
-    for name in ("max_samples", "max_rules_per_chunk", "max_rules_per_row"):
+    for name in ("max_samples", "max_rules_per_chunk", "max_rules_per_row", "max_rule_applications_per_rule"):
         value = getattr(generation_config, name, None)
         if value is not None and value < 0:
             raise ValueError(f"--{name} must be greater than or equal to 0")
+
+    ratio = getattr(generation_config, "max_rule_usage_ratio", None)
+    if ratio is not None and not 0 < ratio <= 1:
+        raise ValueError("--max_rule_usage_ratio must be greater than 0 and less than or equal to 1")
+
+
+def _count_existing_rule_usage(outputs):
+    counts = Counter()
+    for output in outputs:
+        counts.update(_get_applied_rules(output))
+    return counts
+
+
+def _resolve_rule_usage_cap(generation_config, planned_rows):
+    caps = []
+    explicit_cap = getattr(generation_config, "max_rule_applications_per_rule", None)
+    if explicit_cap is not None:
+        caps.append(explicit_cap)
+
+    usage_ratio = getattr(generation_config, "max_rule_usage_ratio", None)
+    if usage_ratio is not None:
+        per_row_budget = (
+            getattr(generation_config, "max_rules_per_row", None)
+            or getattr(generation_config, "max_rules_per_chunk", None)
+            or 1
+        )
+        caps.append(max(1, int(np.ceil(planned_rows * per_row_budget * usage_ratio))))
+
+    if not caps:
+        return None
+    return min(caps)
 
 
 
@@ -238,6 +294,9 @@ def main():
         to_save = resume_dict['question']
         start_idx = len(to_save)
 
+    rule_usage_counts = _count_existing_rule_usage(to_save)
+    max_rule_applications_per_rule = getattr(generation_config, "max_rule_applications_per_rule", None)
+
     # Dataloader
     if dataset_config.dataset_name == 'cefr_texts':
         dataset = load_cefr_text_dataset(
@@ -245,6 +304,12 @@ def main():
             generation_config=generation_config,
             start_idx=start_idx,
         )
+        max_rule_applications_per_rule = _resolve_rule_usage_cap(
+            generation_config,
+            planned_rows=start_idx + len(dataset),
+        )
+        if max_rule_applications_per_rule is not None:
+            log(f'Max feature-rule applications per run: {colorstr(max_rule_applications_per_rule)}')
         if len(dataset) == 0 and start_idx:
             log(f'No remaining cefr_texts rows to process; saving {len(to_save)} resumed rows.')
             to_save_dict = {'question': to_save}
@@ -329,6 +394,8 @@ def main():
                     generation_config.batch_size,
                     max_rules_per_chunk=generation_config.max_rules_per_chunk,
                     max_rules_per_row=generation_config.max_rules_per_row,
+                    rule_usage_counts=rule_usage_counts,
+                    max_rule_applications_per_rule=max_rule_applications_per_rule,
                 )
                 transformed_batch[idx] = aggregate_chunk_results(value, chunks, chunk_results)
 
@@ -341,9 +408,30 @@ def main():
             sentence = [re.sub(r'_{2,}', '<blank>', s) for s in sentence]
 
             if use_hosted_openai:
-                iter_result = openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config, max_rules_per_chunk=generation_config.max_rules_per_chunk)
+                iter_result = openai_transformation(
+                    sentence,
+                    guideline,
+                    client,
+                    sampling_params,
+                    task_config,
+                    model_config,
+                    max_rules_per_chunk=generation_config.max_rules_per_chunk,
+                    rule_usage_counts=rule_usage_counts,
+                    max_rule_applications_per_rule=max_rule_applications_per_rule,
+                )
             else:
-                iter_result = transformation(sentence, guideline, client, tokenizer, sampling_params, task_config, model_config, max_rules_per_chunk=generation_config.max_rules_per_chunk)
+                iter_result = transformation(
+                    sentence,
+                    guideline,
+                    client,
+                    tokenizer,
+                    sampling_params,
+                    task_config,
+                    model_config,
+                    max_rules_per_chunk=generation_config.max_rules_per_chunk,
+                    rule_usage_counts=rule_usage_counts,
+                    max_rule_applications_per_rule=max_rule_applications_per_rule,
+                )
 
         to_save.extend(iter_result)
 

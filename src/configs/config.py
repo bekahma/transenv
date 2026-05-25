@@ -11,6 +11,8 @@ class GenerationConfig:
     max_samples: int = field(default=None, metadata={"help": "Maximum number of input rows to transform after filtering"})
     max_rules_per_chunk: int = field(default=None, metadata={"help": "Maximum accepted feature rules per transformed chunk"})
     max_rules_per_row: int = field(default=None, metadata={"help": "Maximum accepted feature-rule applications per cefr_texts row"})
+    max_rule_applications_per_rule: int = field(default=None, metadata={"help": "Maximum accepted applications of any single feature rule across the run"})
+    max_rule_usage_ratio: float = field(default=None, metadata={"help": "For cefr_texts, cap any single feature rule to this share of the planned maximum accepted rule applications"})
     rerun: str = field(default=None)
     one_transform: bool = field(default=False, metadata={"action": "store_true"})
 

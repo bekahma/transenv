@@ -48,16 +48,33 @@ if [[ -n "${INPUT_CEFR_LEVELS:-}" ]]; then
   INPUT_CEFR_LEVELS_ARG=(--input_cefr_levels "$INPUT_CEFR_LEVELS")
 fi
 
+MAX_RULE_USAGE_RATIO=${MAX_RULE_USAGE_RATIO:-0.20}
+MAX_RULE_USAGE_RATIO_ARG=()
+if [[ -n "$MAX_RULE_USAGE_RATIO" && "$MAX_RULE_USAGE_RATIO" != "none" ]]; then
+  MAX_RULE_USAGE_RATIO_ARG=(--max_rule_usage_ratio "$MAX_RULE_USAGE_RATIO")
+fi
+
+MAX_RULE_APPLICATIONS_PER_RULE_ARG=()
+if [[ -n "${MAX_RULE_APPLICATIONS_PER_RULE:-}" ]]; then
+  MAX_RULE_APPLICATIONS_PER_RULE_ARG=(--max_rule_applications_per_rule "$MAX_RULE_APPLICATIONS_PER_RULE")
+fi
+
+MAX_RULES_PER_CHUNK=${MAX_RULES_PER_CHUNK:-1}
+MAX_RULES_PER_ROW=${MAX_RULES_PER_ROW:-2}
+RUN_SUFFIX=${RUN_SUFFIX:-balanced}
+
 python src/run/main.py \
   --batch_size 5 \
   "${MAX_SAMPLES_ARG[@]}" \
   --text_chunking hybrid \
   --sentence_chunk_min_words 100 \
   --max_chunk_words 80 \
-  --max_rules_per_chunk 1 \
-  --max_rules_per_row 2 \
+  --max_rules_per_chunk "$MAX_RULES_PER_CHUNK" \
+  --max_rules_per_row "$MAX_RULES_PER_ROW" \
+  "${MAX_RULE_USAGE_RATIO_ARG[@]}" \
+  "${MAX_RULE_APPLICATIONS_PER_RULE_ARG[@]}" \
   --save_path ./outputs/cefr_texts/dialect \
-  --file_name "${DIALECT_SLUG}_gpt41mini_full_hybrid" \
+  --file_name "${DIALECT_SLUG}_gpt41mini_full_hybrid_${RUN_SUFFIX}" \
   --input_path ./data/cefr_leveled_texts.csv \
   --text_column text \
   "${INPUT_CEFR_LEVELS_ARG[@]}" \
