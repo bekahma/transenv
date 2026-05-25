@@ -245,6 +245,11 @@ def main():
             generation_config=generation_config,
             start_idx=start_idx,
         )
+        if len(dataset) == 0 and start_idx:
+            log(f'No remaining cefr_texts rows to process; saving {len(to_save)} resumed rows.')
+            to_save_dict = {'question': to_save}
+            save_func(to_save_dict, save_config, dataset_config, generation_config, task_config)
+            return
         dataloader = _batch_dataset(dataset, generation_config.batch_size)
 
     elif task_config.task_name == 'cefr':

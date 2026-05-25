@@ -243,7 +243,10 @@ def load_cefr_text_dataset(dataset_config, generation_config, start_idx=0):
         dataset = dataset.select(range(min(max_samples, len(dataset))))
 
     if start_idx:
-        dataset = dataset.skip(start_idx)
+        if start_idx >= len(dataset):
+            dataset = dataset.select([])
+        else:
+            dataset = dataset.select(range(start_idx, len(dataset)))
 
     def add_internal_text(row):
         text = _normalize_text(row[text_column])

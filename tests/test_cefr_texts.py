@@ -95,6 +95,17 @@ class CefrTextsTest(unittest.TestCase):
         self.assertEqual(dataset[0][INTERNAL_ROW_INDEX_COLUMN], 0)
         self.assertEqual(dataset[1][INTERNAL_ROW_INDEX_COLUMN], 1)
 
+    @unittest.skipUnless(has_hf_datasets(), "Hugging Face datasets is not installed")
+    def test_resume_at_max_samples_returns_empty_dataset(self):
+        config = dataset_config(
+            os.path.join(FIXTURE_DIR, "cefr_texts_levels.csv"),
+            text_column="text",
+            input_cefr_levels="A1,A2",
+        )
+        dataset = load_cefr_text_dataset(config, generation_config(max_samples=2), start_idx=2)
+
+        self.assertEqual(len(dataset), 0)
+
     def test_cefr_group_shorthand(self):
         self.assertEqual(parse_cefr_levels("A"), {"A1", "A2"})
         self.assertEqual(parse_cefr_levels("B1,C"), {"B1", "C1", "C2"})
