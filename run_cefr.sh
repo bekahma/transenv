@@ -23,11 +23,14 @@ mkdir -p logs
 
 python src/run/main.py \
   --batch_size 5 \
-  --max_samples 10 \
-  --text_chunking sentence \
+  --max_samples 50 \
+  --text_chunking hybrid \
+  --sentence_chunk_min_words 100 \
   --max_chunk_words 80 \
+  --max_rules_per_chunk 1 \
+  --max_rules_per_row 2 \
   --save_path ./outputs/cefr_texts/l1 \
-  --file_name A_arabic_gpt41mini_10_sentence \
+  --file_name A_arabic_gpt41mini_50_hybrid \
   --input_path ./data/cefr_leveled_texts.csv \
   --text_column text \
   --input_cefr_levels A1,A2 \
@@ -38,4 +41,3 @@ python src/run/main.py \
   --dataset_name cefr_texts \
   --model_provider openai \
   --model_name gpt-4.1-mini
-  
