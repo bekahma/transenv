@@ -15,6 +15,14 @@ CEFR_LEVEL_GROUPS = {
     "B": ("B1", "B2"),
     "C": ("C1", "C2"),
 }
+DIAGNOSTIC_COUNT_KEYS = (
+    "model_error_count",
+    "semantic_error_count",
+    "no_change_response_count",
+    "parse_failure_count",
+    "blank_rejection_count",
+    "semantic_rejection_count",
+)
 
 SENTENCE_PATTERN = re.compile(r"(.+?(?:[.!?]+[\"')\]]*|$))(\s*)", re.DOTALL)
 WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?")
@@ -97,6 +105,9 @@ def aggregate_chunk_results(orig_sentence, chunks, chunk_results):
     judge_responses = []
     transformed_sentences = []
     chunk_records = []
+    model_errors = []
+    semantic_errors = []
+    diagnostic_counts = {key: 0 for key in DIAGNOSTIC_COUNT_KEYS}
 
     for idx, result in enumerate(chunk_results):
         chunk_orig_text = chunks[idx]["text"]
@@ -107,6 +118,10 @@ def aggregate_chunk_results(orig_sentence, chunks, chunk_results):
         mid_transformed_sentences.extend(result.get("mid_transformed_sentences", []))
         judge_responses.extend(result.get("judge_repsonse", []))
         transformed_sentences.extend(result.get("transformed_sentences", []))
+        model_errors.extend(result.get("model_errors", []))
+        semantic_errors.extend(result.get("semantic_errors", []))
+        for key in DIAGNOSTIC_COUNT_KEYS:
+            diagnostic_counts[key] += result.get(key, 0)
         applied_rules.extend(chunk_rules)
         chunk_records.append({
             "chunk_index": idx,
@@ -128,6 +143,9 @@ def aggregate_chunk_results(orig_sentence, chunks, chunk_results):
         "applied_rules": applied_rules,
         "transformed_sentences": transformed_sentences,
         "final_sentence": final_sentence,
+        "model_errors": model_errors,
+        "semantic_errors": semantic_errors,
+        **diagnostic_counts,
         "chunk_count": len(chunks),
         "chunk_results": chunk_results,
         "chunks": chunk_records,
@@ -302,4 +320,7 @@ def empty_transformation_result(sentence):
         "applied_rules": [],
         "transformed_sentences": [],
         "final_sentence": sentence,
+        "model_errors": [],
+        "semantic_errors": [],
+        **{key: 0 for key in DIAGNOSTIC_COUNT_KEYS},
     }

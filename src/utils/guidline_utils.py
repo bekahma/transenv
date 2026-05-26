@@ -15,18 +15,22 @@ def extract_transformed_sentence(text):
         str: The transformed sentence, or a message if no transformed sentence is found.
     """
     # Capture both one-line outputs and passage-style outputs where the
-    # transformed text starts on the next line after the marker.
-    pattern = r"\*\*Transformed Sentence:\*\*\s*(.*)"
-    
-    # Search for the pattern in the text
-    match = re.search(pattern, text, flags=re.DOTALL)
-    
-    # Return the transformed sentence if found, otherwise return a message
-    if match:
-        transformed_sentence = match.group(1).strip()
-        return transformed_sentence if transformed_sentence else 'No change'
-    else:
-        return 'No change'
+    # transformed text starts on the next line after the marker. Hosted models
+    # occasionally vary the marker even when prompted with the exact format.
+    patterns = (
+        r"\*\*(?:Final\s+)?Transformed Sentence:\*\*\s*(.*)",
+        r"(?:^|\n)(?:Final\s+)?Transformed Sentence:\s*(.*)",
+        r"\*\*Final broken sentence:\*\*\s*(.*)",
+        r"(?:^|\n)Final broken sentence:\s*(.*)",
+    )
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.DOTALL | re.IGNORECASE)
+        if match:
+            transformed_sentence = match.group(1).strip()
+            return transformed_sentence if transformed_sentence else 'No change'
+
+    return 'No change'
     
     
 

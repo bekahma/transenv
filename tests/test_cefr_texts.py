@@ -16,9 +16,11 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from framework.data_return import return_cefr_texts
+from framework import transformation as transformation_module
 from framework.transformation import introduces_blank
 from run import main as run_main
 from utils.cefr_texts import (
+    DIAGNOSTIC_COUNT_KEYS,
     INTERNAL_EMPTY_TEXT_COLUMN,
     INTERNAL_ROW_INDEX_COLUMN,
     INTERNAL_TEXT_COLUMN,
@@ -126,6 +128,16 @@ Line two."""
 
     def test_empty_transformed_sentence_is_no_change(self):
         self.assertEqual(extract_transformed_sentence("**Transformed Sentence:**\n"), "No change")
+
+    def test_extracts_transformed_sentence_marker_variants(self):
+        self.assertEqual(
+            extract_transformed_sentence("Final Transformed Sentence: She a doctor."),
+            "She a doctor.",
+        )
+        self.assertEqual(
+            extract_transformed_sentence('**Final broken sentence:** "I have book."'),
+            '"I have book."',
+        )
 
     def test_sentence_chunking_preserves_separators(self):
         chunks = split_text_chunks("Hello there.  How are you?\nFine.", mode="sentence", max_chunk_words=80)
@@ -468,6 +480,42 @@ Line two."""
         with self.assertRaisesRegex(ValueError, "openai_parallelism"):
             run_main._validate_generation_limits(config)
 
+    def test_all_model_errors_raise_clear_runtime_error(self):
+        output = {
+            "whole_response": ["rate limit", "rate limit", "rate limit", "rate limit", "rate limit"],
+            "model_errors": ["rate limit"],
+            "model_error_count": 5,
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "All hosted OpenAI transformation calls failed"):
+            run_main._raise_if_all_model_calls_failed(0, output)
+
+    def test_hosted_transformation_aborts_repeated_api_errors(self):
+        class FailingCompletions:
+            def create(self, *args, **kwargs):
+                raise RuntimeError("rate limit")
+
+        client = SimpleNamespace(chat=SimpleNamespace(completions=FailingCompletions()))
+        task_config = SimpleNamespace(task_name="english_dialect")
+        model_config = SimpleNamespace(model_name="dummy", semantic_model_name=None)
+        sampling_params = {"temperature": 0.8, "top_p": 0.95, "max_tokens": 20}
+        guideline = [(f"feature {idx}", "unused") for idx in range(10)]
+
+        with patch.object(
+            transformation_module,
+            "openai_framework_application",
+            return_value=[{"role": "system", "content": "system"}],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "failed 10 times in a row"):
+                transformation_module.openai_transformation(
+                    ["Sentence."],
+                    guideline,
+                    client,
+                    sampling_params,
+                    task_config,
+                    model_config,
+                )
+
     def test_saves_appended_audit_columns(self):
         config = dataset_config(
             os.path.join(FIXTURE_DIR, "cefr_texts_levels.csv"),
@@ -485,6 +533,14 @@ Line two."""
                         "whole_response": ["response"],
                         "mid_transformed_sentences": ["I likes apples."],
                         "judge_repsonse": ["no"],
+                        "model_errors": [],
+                        "semantic_errors": [],
+                        "model_error_count": 0,
+                        "semantic_error_count": 0,
+                        "no_change_response_count": 3,
+                        "parse_failure_count": 1,
+                        "blank_rejection_count": 0,
+                        "semantic_rejection_count": 0,
                         "applied_rules": ["SUBJECT VERB AGREEMENT"],
                         "chunk_count": 2,
                         "chunks": [
@@ -530,6 +586,11 @@ Line two."""
         self.assertIn("model_response_count", saved.columns)
         self.assertIn("candidate_transform_count", saved.columns)
         self.assertIn("semantic_judge_count", saved.columns)
+        for key in DIAGNOSTIC_COUNT_KEYS:
+            self.assertIn(key, saved.columns)
+        self.assertIn("sample_model_error", saved.columns)
+        self.assertIn("sample_semantic_error", saved.columns)
+        self.assertIn("sample_model_response", saved.columns)
         self.assertEqual(saved.loc[0, "transformed_text"], "I likes apples.")
         self.assertEqual(json.loads(saved.loc[0, "applied_rules"]), ["SUBJECT VERB AGREEMENT"])
         self.assertEqual(saved.loc[0, "num_applied_rules"], 1)
@@ -538,6 +599,9 @@ Line two."""
         self.assertEqual(saved.loc[0, "model_response_count"], 1)
         self.assertEqual(saved.loc[0, "candidate_transform_count"], 1)
         self.assertEqual(saved.loc[0, "semantic_judge_count"], 1)
+        self.assertEqual(saved.loc[0, "no_change_response_count"], 3)
+        self.assertEqual(saved.loc[0, "parse_failure_count"], 1)
+        self.assertEqual(saved.loc[0, "sample_model_response"], "response")
         self.assertEqual(json.loads(saved.loc[0, "changed_chunk_indices"]), [0])
         self.assertEqual(
             json.loads(saved.loc[0, "changed_chunks"]),

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from registry.dataset_map import  DATASET_MAPPING
-from utils.cefr_texts import load_cefr_text_frame
+from utils.cefr_texts import DIAGNOSTIC_COUNT_KEYS, load_cefr_text_frame
 
 
 
@@ -35,6 +35,22 @@ def _changed_chunk_records(output):
     return changed_records
 
 
+def _truncate_text(value, max_chars=500):
+    if value is None:
+        return ""
+    value = str(value).replace("\n", "\\n")
+    if len(value) <= max_chars:
+        return value
+    return value[:max_chars - 3] + "..."
+
+
+def _first_nonempty(values):
+    for value in values:
+        if value:
+            return value
+    return ""
+
+
 def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     rerun_index = None
     if generation_config.rerun is not None:
@@ -56,6 +72,10 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     model_response_counts = []
     candidate_transform_counts = []
     semantic_judge_counts = []
+    diagnostic_columns = {key: [] for key in DIAGNOSTIC_COUNT_KEYS}
+    sample_model_errors = []
+    sample_semantic_errors = []
+    sample_model_responses = []
 
     for output in outputs:
         orig_sentence = output.get('orig_sentence', '')
@@ -75,6 +95,11 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
         model_response_counts.append(len(output.get('whole_response', [])))
         candidate_transform_counts.append(len(output.get('mid_transformed_sentences', [])))
         semantic_judge_counts.append(len(output.get('judge_repsonse', [])))
+        for key in DIAGNOSTIC_COUNT_KEYS:
+            diagnostic_columns[key].append(output.get(key, 0))
+        sample_model_errors.append(_truncate_text(_first_nonempty(output.get('model_errors', []))))
+        sample_semantic_errors.append(_truncate_text(_first_nonempty(output.get('semantic_errors', []))))
+        sample_model_responses.append(_truncate_text(_first_nonempty(output.get('whole_response', []))))
 
     source_df['orig_sentence'] = orig_sentences
     source_df['transformed_text'] = transformed_texts
@@ -88,6 +113,11 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     source_df['model_response_count'] = model_response_counts
     source_df['candidate_transform_count'] = candidate_transform_counts
     source_df['semantic_judge_count'] = semantic_judge_counts
+    for key, values in diagnostic_columns.items():
+        source_df[key] = values
+    source_df['sample_model_error'] = sample_model_errors
+    source_df['sample_semantic_error'] = sample_semantic_errors
+    source_df['sample_model_response'] = sample_model_responses
 
     if '__transenv_row_idx' in source_df.columns:
         source_df = source_df.drop(columns=['__transenv_row_idx'])

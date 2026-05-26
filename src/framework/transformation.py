@@ -44,6 +44,13 @@ def _run_in_parallel(items, max_workers, func):
         return list(executor.map(func, items))
 
 
+def _has_transformed_sentence_marker(response):
+    if response is None:
+        return False
+    response = response.lower()
+    return "transformed sentence:" in response or "final broken sentence:" in response
+
+
 
 def framework_application(guideline, task):
     guideline = guideline[1]
@@ -203,6 +210,12 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
     mid_transformed_sentences = [[] for _ in range(len(sentence))]
     judge_responses = [[] for _ in range(len(sentence))]
     transformed_sentences = [[] for _ in range(len(sentence))]
+    model_errors = [[] for _ in range(len(sentence))]
+    semantic_errors = [[] for _ in range(len(sentence))]
+    no_change_response_counts = [0 for _ in range(len(sentence))]
+    parse_failure_counts = [0 for _ in range(len(sentence))]
+    blank_rejection_counts = [0 for _ in range(len(sentence))]
+    semantic_rejection_counts = [0 for _ in range(len(sentence))]
 
     guideline = _order_guidelines(guideline, rule_usage_counts, rule_balance_strength)
 
@@ -212,6 +225,8 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
         'max_tokens': sampling_params['max_tokens'],
     }
     semantic_model_name = model_config.semantic_model_name or model_config.model_name
+    consecutive_model_errors = 0
+    max_consecutive_model_errors = 10
 
     for i in range(len(guideline)):
         feature = guideline[i][0]
@@ -247,9 +262,17 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
         candidate_tasks = []
         for num, response, error in _run_in_parallel(active_prompts, openai_parallelism, call_transformation):
             if error is not None:
+                consecutive_model_errors += 1
+                model_errors[num].append(error)
                 whole_responses[num].append(error)
+                if consecutive_model_errors >= max_consecutive_model_errors:
+                    raise RuntimeError(
+                        f"Hosted OpenAI transformation failed {consecutive_model_errors} times in a row. "
+                        f"Latest feature: {feature}. Latest error: {error}"
+                    )
                 continue
 
+            consecutive_model_errors = 0
             whole_responses[num].append(response)
 
             if response is None:
@@ -258,8 +281,12 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
             transformed_sentence = extract_transformed_sentence(response)
 
             if not transformed_sentence.strip() or ('no change' in transformed_sentence.lower()):
+                no_change_response_counts[num] += 1
+                if not _has_transformed_sentence_marker(response):
+                    parse_failure_counts[num] += 1
                 continue
             if introduces_blank(orig_sentence[num], transformed_sentence):
+                blank_rejection_counts[num] += 1
                 continue
 
             mid_transformed_sentences[num].append(transformed_sentence)
@@ -284,6 +311,7 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
         semantic_results = _run_in_parallel(candidate_tasks, openai_parallelism, call_semantic_check)
         for num, transformed_sentence, judge_response, error in semantic_results:
             if error is not None:
+                semantic_errors[num].append(error)
                 judge_responses[num].append(error)
                 continue
 
@@ -297,6 +325,8 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
                 if rule_usage_counts is not None:
                     rule_usage_counts[feature] += 1
                 transformed_sentences[num].append(transformed_sentence)
+            else:
+                semantic_rejection_counts[num] += 1
     
     iter_result = list()
 
@@ -308,7 +338,15 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
             'judge_repsonse': judge_responses[num],
             'applied_rules': applied_rules[num],
             'transformed_sentences': transformed_sentences[num],
-            'final_sentence': sentence[num]
+            'final_sentence': sentence[num],
+            'model_errors': model_errors[num],
+            'semantic_errors': semantic_errors[num],
+            'model_error_count': len(model_errors[num]),
+            'semantic_error_count': len(semantic_errors[num]),
+            'no_change_response_count': no_change_response_counts[num],
+            'parse_failure_count': parse_failure_counts[num],
+            'blank_rejection_count': blank_rejection_counts[num],
+            'semantic_rejection_count': semantic_rejection_counts[num],
         })
 
     return iter_result

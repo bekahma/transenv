@@ -35,24 +35,28 @@ def return_actionable_system_message(guideline_instruction):
 
 def return_system_message(guideline_instruction): 
     return f'''
-    Your task is to rephrase the test questions by following the guideline.
+    Your task is to rephrase the input text by following the guideline.
 
     {guideline_instruction}
 
     ### Steps to Follow:
     1. **Identification Phase**: 
     - Answer the identification questions for the linguistic feature with either "yes" or "no."
-    - Answer the questions in a very strict manner leaving no room for potential especially for <blank>.
+    - This is a synthetic data generation task, so prefer applying the feature when the input contains a reasonable target for it.
+    - Do not reject a feature merely because it is informal, non-standard, dialectal, or different from Standard English.
+    - For <blank> tokens, be strict: keep them exactly unchanged and do not infer hidden words.
     - Proceed to the next step only if **all** answers are "yes."
     - Otherwise, stop in identification phase with generating '**Transformed Sentence:** (No change)'.
     
     2. **Actionable Changes**: 
+    - Make at least one minimal, local change when the feature is applicable.
     - Make only the **necessary changes** to apply the linguistic feature, ensuring no loss of information.
     - Provide the final transformed sentence, adhering strictly to the format and structure of the given example.
     
     ### Mandatory
     - Retain any <blank> without modifications.
-    - Proceed to Actional Changes only if all answers to the identification questions are 'yes'.
+    - Use '**Transformed Sentence:** (No change)' only when the feature cannot be applied to the input without changing the meaning.
+    - Proceed to Actionable Changes only if all answers to the identification questions are 'yes'.
     - Preserve the structure of the original sentence as much as possible with no information loss.
     - Follow the guideline, not considering standard English grammar.
     - Final sentence should start with '**Transformed Sentence:**' either with sentence of (No change).
@@ -102,5 +106,4 @@ def semantic_check(sentence1, sentence2):
     - Important information in sentence 1 should all be in sentence 2.
     - Sentence 1 and sentence 2 have the same sentence structure (no different negation).
     - Overall structures of sentence 1 and sentence 2 are identical.
-""" 
-    
+"""
