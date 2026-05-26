@@ -117,6 +117,9 @@ def aggregate_chunk_results(orig_sentence, chunks, chunk_results):
             "separator": chunks[idx]["separator"],
         })
 
+    if not applied_rules:
+        final_sentence = _normalize_text(orig_sentence)
+
     return {
         "orig_sentence": _normalize_text(orig_sentence),
         "whole_response": whole_responses,

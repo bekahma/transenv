@@ -53,6 +53,9 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     changed_chunk_counts = []
     changed_chunk_indices = []
     changed_chunks = []
+    model_response_counts = []
+    candidate_transform_counts = []
+    semantic_judge_counts = []
 
     for output in outputs:
         orig_sentence = output.get('orig_sentence', '')
@@ -69,6 +72,9 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
         changed_chunk_counts.append(len(changed_chunk_records))
         changed_chunk_indices.append(json.dumps([record['chunk_index'] for record in changed_chunk_records], ensure_ascii=False))
         changed_chunks.append(json.dumps(changed_chunk_records, ensure_ascii=False))
+        model_response_counts.append(len(output.get('whole_response', [])))
+        candidate_transform_counts.append(len(output.get('mid_transformed_sentences', [])))
+        semantic_judge_counts.append(len(output.get('judge_repsonse', [])))
 
     source_df['orig_sentence'] = orig_sentences
     source_df['transformed_text'] = transformed_texts
@@ -79,6 +85,9 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     source_df['changed_chunk_count'] = changed_chunk_counts
     source_df['changed_chunk_indices'] = changed_chunk_indices
     source_df['changed_chunks'] = changed_chunks
+    source_df['model_response_count'] = model_response_counts
+    source_df['candidate_transform_count'] = candidate_transform_counts
+    source_df['semantic_judge_count'] = semantic_judge_counts
 
     if '__transenv_row_idx' in source_df.columns:
         source_df = source_df.drop(columns=['__transenv_row_idx'])

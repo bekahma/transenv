@@ -55,14 +55,26 @@ if [[ -n "$MAX_RULE_USAGE_RATIO" && "$MAX_RULE_USAGE_RATIO" != "none" ]]; then
 fi
 
 MAX_RULE_APPLICATIONS_PER_RULE_ARG=()
-if [[ -n "${MAX_RULE_APPLICATIONS_PER_RULE:-}" ]]; then
+if [[ -n "${MAX_RULE_APPLICATIONS_PER_RULE:-}" && "$MAX_RULE_APPLICATIONS_PER_RULE" != "none" && "$MAX_RULE_APPLICATIONS_PER_RULE" != "0" ]]; then
   MAX_RULE_APPLICATIONS_PER_RULE_ARG=(--max_rule_applications_per_rule "$MAX_RULE_APPLICATIONS_PER_RULE")
 fi
 
 MAX_RULES_PER_CHUNK=${MAX_RULES_PER_CHUNK:-1}
 MAX_RULES_PER_ROW=${MAX_RULES_PER_ROW:-2}
 RULE_BALANCE_STRENGTH=${RULE_BALANCE_STRENGTH:-1.0}
+OPENAI_PARALLELISM=${OPENAI_PARALLELISM:-5}
 RUN_SUFFIX=${RUN_SUFFIX:-softbalanced}
+
+echo "Dialect: $DIALECT"
+echo "File suffix: $RUN_SUFFIX"
+echo "MAX_SAMPLES: ${MAX_SAMPLES:-<none>}"
+echo "INPUT_CEFR_LEVELS: ${INPUT_CEFR_LEVELS:-<none>}"
+echo "MAX_RULES_PER_CHUNK: $MAX_RULES_PER_CHUNK"
+echo "MAX_RULES_PER_ROW: $MAX_RULES_PER_ROW"
+echo "MAX_RULE_USAGE_RATIO: $MAX_RULE_USAGE_RATIO"
+echo "MAX_RULE_APPLICATIONS_PER_RULE: ${MAX_RULE_APPLICATIONS_PER_RULE:-<none>}"
+echo "RULE_BALANCE_STRENGTH: $RULE_BALANCE_STRENGTH"
+echo "OPENAI_PARALLELISM: $OPENAI_PARALLELISM"
 
 python src/run/main.py \
   --batch_size 5 \
@@ -75,6 +87,7 @@ python src/run/main.py \
   "${MAX_RULE_USAGE_RATIO_ARG[@]}" \
   "${MAX_RULE_APPLICATIONS_PER_RULE_ARG[@]}" \
   --rule_balance_strength "$RULE_BALANCE_STRENGTH" \
+  --openai_parallelism "$OPENAI_PARALLELISM" \
   --save_path ./outputs/cefr_texts/dialect \
   --file_name "${DIALECT_SLUG}_gpt41mini_full_hybrid_${RUN_SUFFIX}" \
   --input_path ./data/cefr_leveled_texts.csv \

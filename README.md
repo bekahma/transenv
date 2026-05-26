@@ -45,11 +45,12 @@ python src/run/main.py --batch_size 15  --save_path ./outputs/mmlu/l1 --file_nam
 # Convert a local CEFR-levelled English text CSV to an ESL variety
 python src/run/main.py --batch_size 15 --save_path ./outputs/cefr_texts/l1 --file_name A_arabic --input_path ./data/cefr_texts_a.csv --text_column text --input_cefr_levels A1,A2 --l1 Arabic --task_name L1 --cefr_level A --data_path ./ --port_num 6001 --dataset_name cefr_texts --model_name google/gemma-2-27b-it --tokenizer google/gemma-2-27b-it
 
-# Convert the same CSV with a hosted OpenAI model instead of local vLLM
-python src/run/main.py --batch_size 15 --text_chunking hybrid --sentence_chunk_min_words 100 --max_chunk_words 80 --save_path ./outputs/cefr_texts/l1 --file_name A_arabic_gpt41mini --input_path ./data/cefr_texts_a.csv --text_column text --input_cefr_levels A1,A2 --l1 Arabic --task_name L1 --cefr_level A --data_path ./ --dataset_name cefr_texts --model_provider openai --model_name gpt-4.1-mini
+# Convert the same CSV with a hosted OpenAI model instead of local vLLM.
+# Increase --openai_parallelism to reduce wall-clock time by keeping more API calls in flight.
+python src/run/main.py --batch_size 15 --openai_parallelism 5 --text_chunking hybrid --sentence_chunk_min_words 100 --max_chunk_words 80 --save_path ./outputs/cefr_texts/l1 --file_name A_arabic_gpt41mini --input_path ./data/cefr_texts_a.csv --text_column text --input_cefr_levels A1,A2 --l1 Arabic --task_name L1 --cefr_level A --data_path ./ --dataset_name cefr_texts --model_provider openai --model_name gpt-4.1-mini
 
 # Smoke test only the first 10 filtered rows, capped at one accepted rule per chunk and two per row
-python src/run/main.py --batch_size 5 --max_samples 10 --text_chunking hybrid --sentence_chunk_min_words 100 --max_chunk_words 80 --max_rules_per_chunk 1 --max_rules_per_row 2 --save_path ./outputs/cefr_texts/l1 --file_name A_arabic_gpt41mini_10 --input_path ./data/cefr_texts_a.csv --text_column text --input_cefr_levels A1,A2 --l1 Arabic --task_name L1 --cefr_level A --data_path ./ --dataset_name cefr_texts --model_provider openai --model_name gpt-4.1-mini
+python src/run/main.py --batch_size 5 --openai_parallelism 5 --max_samples 10 --text_chunking hybrid --sentence_chunk_min_words 100 --max_chunk_words 80 --max_rules_per_chunk 1 --max_rules_per_row 2 --save_path ./outputs/cefr_texts/l1 --file_name A_arabic_gpt41mini_10 --input_path ./data/cefr_texts_a.csv --text_column text --input_cefr_levels A1,A2 --l1 Arabic --task_name L1 --cefr_level A --data_path ./ --dataset_name cefr_texts --model_provider openai --model_name gpt-4.1-mini
 
 # Post-filter completed CEFR text transformations for CAA/vector extraction
 python src/run/filter_cefr_outputs.py --input_csv ./outputs/cefr_texts/l1/A_arabic_gpt41mini_10.csv --output_dir ./outputs/cefr_texts/l1/filtered --file_prefix A_arabic_gpt41mini_10 --max_edit_rate 0.10

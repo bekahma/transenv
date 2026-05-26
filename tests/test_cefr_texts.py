@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -212,6 +213,30 @@ Line two."""
             ],
         )
 
+    def test_aggregate_without_rules_preserves_original_whitespace(self):
+        chunks = [
+            {"text": "Hello there.", "separator": " "},
+            {"text": "How are you?", "separator": ""},
+        ]
+        results = [
+            {
+                "final_sentence": "Hello there.",
+                "applied_rules": [],
+                "transformed_sentences": [],
+            },
+            {
+                "final_sentence": "How are you?",
+                "applied_rules": [],
+                "transformed_sentences": [],
+            },
+        ]
+
+        original = " \nHello there. How are you?\n "
+        aggregated = aggregate_chunk_results(original, chunks, results)
+
+        self.assertEqual(aggregated["final_sentence"], original)
+        self.assertEqual(aggregated["applied_rules"], [])
+
     def test_aggregates_repeated_rule_applications(self):
         chunks = [
             {"text": "One.", "separator": " "},
@@ -322,6 +347,127 @@ Line two."""
         self.assertEqual(results[2]["final_sentence"], "Three.")
         self.assertEqual(results[2]["applied_rules"], [])
 
+    def test_hosted_row_budget_batches_chunks_when_parallelism_enabled(self):
+        chunks = [
+            {"text": "One.", "separator": " "},
+            {"text": "Two.", "separator": " "},
+            {"text": "Three.", "separator": ""},
+        ]
+        calls = []
+        rule_usage_counts = Counter()
+
+        def fake_transform(sentences, *args, **kwargs):
+            calls.append((list(sentences), kwargs["max_rules_per_chunk"], kwargs["openai_parallelism"]))
+            return [
+                {
+                    "orig_sentence": text,
+                    "final_sentence": f"{text} changed",
+                    "whole_response": [],
+                    "mid_transformed_sentences": [],
+                    "judge_repsonse": [],
+                    "applied_rules": [f"rule:{text}"],
+                    "transformed_sentences": [f"{text} changed"],
+                }
+                for text in sentences
+            ]
+
+        with patch.object(run_main, "_transform_sentences", side_effect=fake_transform):
+            results = run_main._transform_cefr_chunks(
+                chunks,
+                guideline=[],
+                client=None,
+                tokenizer=None,
+                sampling_params={},
+                task_config=None,
+                model_config=None,
+                use_hosted_openai=True,
+                batch_size=5,
+                max_rules_per_chunk=1,
+                max_rules_per_row=2,
+                rule_usage_counts=rule_usage_counts,
+                openai_parallelism=2,
+            )
+
+        self.assertEqual(calls, [(["One.", "Two."], 1, 2)])
+        self.assertEqual(results[0]["applied_rules"], ["rule:One."])
+        self.assertEqual(results[1]["applied_rules"], ["rule:Two."])
+        self.assertEqual(results[2]["final_sentence"], "Three.")
+        self.assertEqual(rule_usage_counts, Counter({"rule:One.": 1, "rule:Two.": 1}))
+
+    def test_parallel_chunk_window_respects_rule_usage_cap(self):
+        chunks = [
+            {"text": "One.", "separator": " "},
+            {"text": "Two.", "separator": ""},
+        ]
+        rule_usage_counts = Counter()
+
+        def fake_transform(sentences, *args, **kwargs):
+            return [
+                {
+                    "orig_sentence": text,
+                    "final_sentence": f"{text} changed",
+                    "whole_response": [],
+                    "mid_transformed_sentences": [],
+                    "judge_repsonse": [],
+                    "applied_rules": ["shared-rule"],
+                    "transformed_sentences": [f"{text} changed"],
+                }
+                for text in sentences
+            ]
+
+        with patch.object(run_main, "_transform_sentences", side_effect=fake_transform):
+            results = run_main._transform_cefr_chunks(
+                chunks,
+                guideline=[],
+                client=None,
+                tokenizer=None,
+                sampling_params={},
+                task_config=None,
+                model_config=None,
+                use_hosted_openai=True,
+                batch_size=5,
+                max_rules_per_chunk=1,
+                max_rules_per_row=2,
+                rule_usage_counts=rule_usage_counts,
+                max_rule_applications_per_rule=1,
+                openai_parallelism=2,
+            )
+
+        self.assertEqual(results[0]["applied_rules"], ["shared-rule"])
+        self.assertEqual(results[1]["applied_rules"], [])
+        self.assertEqual(results[1]["final_sentence"], "Two.")
+        self.assertEqual(rule_usage_counts, Counter({"shared-rule": 1}))
+
+    def test_generation_limits_reject_zero_rule_budgets(self):
+        config = SimpleNamespace(
+            batch_size=1,
+            openai_parallelism=1,
+            max_samples=None,
+            max_rules_per_chunk=0,
+            max_rules_per_row=None,
+            max_rule_applications_per_rule=None,
+            max_rule_usage_ratio=None,
+            rule_balance_strength=0,
+        )
+
+        with self.assertRaisesRegex(ValueError, "max_rules_per_chunk"):
+            run_main._validate_generation_limits(config)
+
+        config.max_rules_per_chunk = None
+        config.max_rules_per_row = 0
+        with self.assertRaisesRegex(ValueError, "max_rules_per_row"):
+            run_main._validate_generation_limits(config)
+
+        config.max_rules_per_row = None
+        config.max_rule_applications_per_rule = 0
+        with self.assertRaisesRegex(ValueError, "max_rule_applications_per_rule"):
+            run_main._validate_generation_limits(config)
+
+        config.max_rule_applications_per_rule = None
+        config.openai_parallelism = 0
+        with self.assertRaisesRegex(ValueError, "openai_parallelism"):
+            run_main._validate_generation_limits(config)
+
     def test_saves_appended_audit_columns(self):
         config = dataset_config(
             os.path.join(FIXTURE_DIR, "cefr_texts_levels.csv"),
@@ -336,6 +482,9 @@ Line two."""
                     {
                         "orig_sentence": "I like apples.",
                         "final_sentence": "I likes apples.",
+                        "whole_response": ["response"],
+                        "mid_transformed_sentences": ["I likes apples."],
+                        "judge_repsonse": ["no"],
                         "applied_rules": ["SUBJECT VERB AGREEMENT"],
                         "chunk_count": 2,
                         "chunks": [
@@ -378,11 +527,17 @@ Line two."""
         self.assertIn("changed_chunk_count", saved.columns)
         self.assertIn("changed_chunk_indices", saved.columns)
         self.assertIn("changed_chunks", saved.columns)
+        self.assertIn("model_response_count", saved.columns)
+        self.assertIn("candidate_transform_count", saved.columns)
+        self.assertIn("semantic_judge_count", saved.columns)
         self.assertEqual(saved.loc[0, "transformed_text"], "I likes apples.")
         self.assertEqual(json.loads(saved.loc[0, "applied_rules"]), ["SUBJECT VERB AGREEMENT"])
         self.assertEqual(saved.loc[0, "num_applied_rules"], 1)
         self.assertTrue(bool(saved.loc[0, "is_changed"]))
         self.assertEqual(saved.loc[0, "changed_chunk_count"], 1)
+        self.assertEqual(saved.loc[0, "model_response_count"], 1)
+        self.assertEqual(saved.loc[0, "candidate_transform_count"], 1)
+        self.assertEqual(saved.loc[0, "semantic_judge_count"], 1)
         self.assertEqual(json.loads(saved.loc[0, "changed_chunk_indices"]), [0])
         self.assertEqual(
             json.loads(saved.loc[0, "changed_chunks"]),

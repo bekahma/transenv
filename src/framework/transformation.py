@@ -1,5 +1,6 @@
 import copy
 import random
+from concurrent.futures import ThreadPoolExecutor
 
 from registry.prompt import *
 from utils.guidline_utils import *
@@ -33,6 +34,14 @@ def _order_guidelines(guideline, rule_usage_counts, rule_balance_strength=0.0):
             random.random(),
         ),
     )
+
+
+def _run_in_parallel(items, max_workers, func):
+    if max_workers is None or max_workers <= 1 or len(items) <= 1:
+        return [func(item) for item in items]
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(items))) as executor:
+        return list(executor.map(func, items))
 
 
 
@@ -175,7 +184,7 @@ def openai_framework_application(guideline, task):
 
 
 
-def openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config, max_rules_per_chunk=None, rule_usage_counts=None, max_rule_applications_per_rule=None, rule_balance_strength=0.0):
+def openai_transformation(sentence, guideline, client, sampling_params, task_config, model_config, max_rules_per_chunk=None, rule_usage_counts=None, max_rule_applications_per_rule=None, rule_balance_strength=0.0, openai_parallelism=1):
     """
     Hosted chat-completion transformation.
 
@@ -211,12 +220,19 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
 
         input_prompt = openai_framework_application(guideline=guideline[i], task=task_config.task_name)
 
-        for num in range(len(sentence)):
-            if _rule_budget_reached(applied_rules[num], max_rules_per_chunk):
-                continue
+        active_prompts = [
+            (
+                num,
+                input_prompt + [{"role": 'user', "content": f"**Original Sentence:** {sentence[num]}"}],
+            )
+            for num in range(len(sentence))
+            if not _rule_budget_reached(applied_rules[num], max_rules_per_chunk)
+        ]
+        if not active_prompts:
+            continue
 
-            prompt = input_prompt + [{"role": 'user', "content": f"**Original Sentence:** {sentence[num]}"}]
-
+        def call_transformation(item):
+            num, prompt = item
             try:
                 responses = client.chat.completions.create(
                     model=model_config.model_name,
@@ -224,10 +240,16 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
                     **transformation_params
                 )
             except Exception as e:
-                whole_responses[num].append(str(e))
+                return num, None, str(e)
+
+            return num, responses.choices[0].message.content, None
+
+        candidate_tasks = []
+        for num, response, error in _run_in_parallel(active_prompts, openai_parallelism, call_transformation):
+            if error is not None:
+                whole_responses[num].append(error)
                 continue
 
-            response = responses.choices[0].message.content
             whole_responses[num].append(response)
 
             if response is None:
@@ -243,6 +265,10 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
             mid_transformed_sentences[num].append(transformed_sentence)
 
             semantic_input_prompt = semantic_check(orig_sentence[num], transformed_sentence)
+            candidate_tasks.append((num, transformed_sentence, semantic_input_prompt))
+
+        def call_semantic_check(item):
+            num, transformed_sentence, semantic_input_prompt = item
             try:
                 semantic_response = client.chat.completions.create(
                     model=semantic_model_name,
@@ -251,10 +277,16 @@ def openai_transformation(sentence, guideline, client, sampling_params, task_con
                     max_tokens=10,
                 )
             except Exception as e:
-                judge_responses[num].append(str(e).lower())
+                return num, transformed_sentence, None, str(e).lower()
+
+            return num, transformed_sentence, semantic_response.choices[0].message.content.lower(), None
+
+        semantic_results = _run_in_parallel(candidate_tasks, openai_parallelism, call_semantic_check)
+        for num, transformed_sentence, judge_response, error in semantic_results:
+            if error is not None:
+                judge_responses[num].append(error)
                 continue
 
-            judge_response = semantic_response.choices[0].message.content.lower()
             judge_responses[num].append(judge_response)
 
             if 'no' in judge_response:

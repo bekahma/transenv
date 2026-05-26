@@ -7,6 +7,7 @@ class GenerationConfig:
     temperature: float = field(default=0.8, metadata={"help": "temperature value for generation"})
     top_p: float = field(default=0.95, metadata={"help": "top_p value for generation"})
     batch_size: int = field(default=30, metadata={"help": "batch size for generation"})
+    openai_parallelism: int = field(default=1, metadata={"help": "Maximum hosted OpenAI requests to keep in flight"})
     max_tokens: int = field(default=2000)
     max_samples: int = field(default=None, metadata={"help": "Maximum number of input rows to transform after filtering"})
     max_rules_per_chunk: int = field(default=None, metadata={"help": "Maximum accepted feature rules per transformed chunk"})
