@@ -190,6 +190,27 @@ Line two."""
         self.assertEqual(aggregated["final_sentence"], "Hello there. How you?")
         self.assertEqual(aggregated["applied_rules"], ["MISSING VERB"])
         self.assertEqual(aggregated["chunk_count"], 2)
+        self.assertEqual(
+            aggregated["chunks"],
+            [
+                {
+                    "chunk_index": 0,
+                    "orig_text": "Hello there.",
+                    "transformed_text": "Hello there.",
+                    "applied_rules": [],
+                    "is_changed": False,
+                    "separator": " ",
+                },
+                {
+                    "chunk_index": 1,
+                    "orig_text": "How are you?",
+                    "transformed_text": "How you?",
+                    "applied_rules": ["MISSING VERB"],
+                    "is_changed": True,
+                    "separator": "",
+                },
+            ],
+        )
 
     def test_aggregates_repeated_rule_applications(self):
         chunks = [
@@ -316,6 +337,25 @@ Line two."""
                         "orig_sentence": "I like apples.",
                         "final_sentence": "I likes apples.",
                         "applied_rules": ["SUBJECT VERB AGREEMENT"],
+                        "chunk_count": 2,
+                        "chunks": [
+                            {
+                                "chunk_index": 0,
+                                "orig_text": "I like apples.",
+                                "transformed_text": "I likes apples.",
+                                "applied_rules": ["SUBJECT VERB AGREEMENT"],
+                                "is_changed": True,
+                                "separator": "",
+                            },
+                            {
+                                "chunk_index": 1,
+                                "orig_text": "No change.",
+                                "transformed_text": "No change.",
+                                "applied_rules": [],
+                                "is_changed": False,
+                                "separator": "",
+                            },
+                        ],
                     },
                     {
                         "orig_sentence": "The train arrived late.",
@@ -335,11 +375,28 @@ Line two."""
         self.assertIn("num_applied_rules", saved.columns)
         self.assertIn("is_changed", saved.columns)
         self.assertIn("chunk_count", saved.columns)
+        self.assertIn("changed_chunk_count", saved.columns)
+        self.assertIn("changed_chunk_indices", saved.columns)
+        self.assertIn("changed_chunks", saved.columns)
         self.assertEqual(saved.loc[0, "transformed_text"], "I likes apples.")
         self.assertEqual(json.loads(saved.loc[0, "applied_rules"]), ["SUBJECT VERB AGREEMENT"])
         self.assertEqual(saved.loc[0, "num_applied_rules"], 1)
         self.assertTrue(bool(saved.loc[0, "is_changed"]))
+        self.assertEqual(saved.loc[0, "changed_chunk_count"], 1)
+        self.assertEqual(json.loads(saved.loc[0, "changed_chunk_indices"]), [0])
+        self.assertEqual(
+            json.loads(saved.loc[0, "changed_chunks"]),
+            [
+                {
+                    "chunk_index": 0,
+                    "orig_text": "I like apples.",
+                    "transformed_text": "I likes apples.",
+                    "applied_rules": ["SUBJECT VERB AGREEMENT"],
+                }
+            ],
+        )
         self.assertFalse(bool(saved.loc[1, "is_changed"]))
+        self.assertEqual(saved.loc[1, "changed_chunk_count"], 0)
 
 
 if __name__ == "__main__":

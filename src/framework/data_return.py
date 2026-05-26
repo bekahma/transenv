@@ -15,6 +15,26 @@ def return_dataloader(dataset_config, generation_config, start_idx=None):
     return DATASET_MAPPING[dataset_config.dataset_name](generation_config.batch_size, rerun_index, start_idx)
 
 
+def _changed_chunk_records(output):
+    records = output.get('chunks', [])
+    if not records:
+        return []
+
+    changed_records = []
+    for record in records:
+        rules = record.get('applied_rules', []) or []
+        is_changed = record.get('is_changed', False)
+        if rules or is_changed:
+            changed_records.append({
+                'chunk_index': record.get('chunk_index'),
+                'orig_text': record.get('orig_text', ''),
+                'transformed_text': record.get('transformed_text', record.get('orig_text', '')),
+                'applied_rules': rules,
+            })
+
+    return changed_records
+
+
 def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     rerun_index = None
     if generation_config.rerun is not None:
@@ -30,11 +50,15 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     num_applied_rules = []
     is_changed = []
     chunk_counts = []
+    changed_chunk_counts = []
+    changed_chunk_indices = []
+    changed_chunks = []
 
     for output in outputs:
         orig_sentence = output.get('orig_sentence', '')
         final_sentence = output.get('final_sentence', orig_sentence)
         rules = output.get('applied_rules', output.get('applied_rule', []))
+        changed_chunk_records = _changed_chunk_records(output)
 
         orig_sentences.append(orig_sentence)
         transformed_texts.append(final_sentence)
@@ -42,6 +66,9 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
         num_applied_rules.append(len(rules))
         is_changed.append(final_sentence != orig_sentence)
         chunk_counts.append(output.get('chunk_count', 1))
+        changed_chunk_counts.append(len(changed_chunk_records))
+        changed_chunk_indices.append(json.dumps([record['chunk_index'] for record in changed_chunk_records], ensure_ascii=False))
+        changed_chunks.append(json.dumps(changed_chunk_records, ensure_ascii=False))
 
     source_df['orig_sentence'] = orig_sentences
     source_df['transformed_text'] = transformed_texts
@@ -49,6 +76,9 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     source_df['num_applied_rules'] = num_applied_rules
     source_df['is_changed'] = is_changed
     source_df['chunk_count'] = chunk_counts
+    source_df['changed_chunk_count'] = changed_chunk_counts
+    source_df['changed_chunk_indices'] = changed_chunk_indices
+    source_df['changed_chunks'] = changed_chunks
 
     if '__transenv_row_idx' in source_df.columns:
         source_df = source_df.drop(columns=['__transenv_row_idx'])

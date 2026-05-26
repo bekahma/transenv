@@ -65,7 +65,7 @@ def _load_dataset(*args, **kwargs):
     return load_dataset(*args, **kwargs)
 
 
-def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, rule_usage_counts=None, max_rule_applications_per_rule=None):
+def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, rule_usage_counts=None, max_rule_applications_per_rule=None, rule_balance_strength=0.0):
     results = []
 
     for start_idx in range(0, len(sentences), batch_size):
@@ -81,6 +81,7 @@ def _transform_sentences(sentences, guideline, client, tokenizer, sampling_param
                 max_rules_per_chunk=max_rules_per_chunk,
                 rule_usage_counts=rule_usage_counts,
                 max_rule_applications_per_rule=max_rule_applications_per_rule,
+                rule_balance_strength=rule_balance_strength,
             )
         else:
             batch_results = transformation(
@@ -94,6 +95,7 @@ def _transform_sentences(sentences, guideline, client, tokenizer, sampling_param
                 max_rules_per_chunk=max_rules_per_chunk,
                 rule_usage_counts=rule_usage_counts,
                 max_rule_applications_per_rule=max_rule_applications_per_rule,
+                rule_balance_strength=rule_balance_strength,
             )
         results.extend(batch_results)
 
@@ -162,7 +164,7 @@ def _trim_results_to_row_rule_budget(chunk_results, chunks, max_rules_per_row):
     return trimmed_results
 
 
-def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, rule_usage_counts=None, max_rule_applications_per_rule=None):
+def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, rule_usage_counts=None, max_rule_applications_per_rule=None, rule_balance_strength=0.0):
     chunk_sentences = [chunk["text"] for chunk in chunks]
 
     if max_rules_per_row is None:
@@ -179,6 +181,7 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             max_rules_per_chunk=max_rules_per_chunk,
             rule_usage_counts=rule_usage_counts,
             max_rule_applications_per_rule=max_rule_applications_per_rule,
+            rule_balance_strength=rule_balance_strength,
         )
 
     chunk_results = []
@@ -203,6 +206,7 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             max_rules_per_chunk=chunk_rule_budget,
             rule_usage_counts=rule_usage_counts,
             max_rule_applications_per_rule=max_rule_applications_per_rule,
+            rule_balance_strength=rule_balance_strength,
         )[0]
         result = _limit_result_to_rule_budget(result, chunk["text"], remaining_rules)
         remaining_rules -= _count_rule_applications(result)
@@ -220,6 +224,10 @@ def _validate_generation_limits(generation_config):
     ratio = getattr(generation_config, "max_rule_usage_ratio", None)
     if ratio is not None and not 0 < ratio <= 1:
         raise ValueError("--max_rule_usage_ratio must be greater than 0 and less than or equal to 1")
+
+    balance_strength = getattr(generation_config, "rule_balance_strength", None)
+    if balance_strength is not None and balance_strength < 0:
+        raise ValueError("--rule_balance_strength must be greater than or equal to 0")
 
 
 def _count_existing_rule_usage(outputs):
@@ -396,6 +404,7 @@ def main():
                     max_rules_per_row=generation_config.max_rules_per_row,
                     rule_usage_counts=rule_usage_counts,
                     max_rule_applications_per_rule=max_rule_applications_per_rule,
+                    rule_balance_strength=generation_config.rule_balance_strength,
                 )
                 transformed_batch[idx] = aggregate_chunk_results(value, chunks, chunk_results)
 
@@ -418,6 +427,7 @@ def main():
                     max_rules_per_chunk=generation_config.max_rules_per_chunk,
                     rule_usage_counts=rule_usage_counts,
                     max_rule_applications_per_rule=max_rule_applications_per_rule,
+                    rule_balance_strength=generation_config.rule_balance_strength,
                 )
             else:
                 iter_result = transformation(
@@ -431,6 +441,7 @@ def main():
                     max_rules_per_chunk=generation_config.max_rules_per_chunk,
                     rule_usage_counts=rule_usage_counts,
                     max_rule_applications_per_rule=max_rule_applications_per_rule,
+                    rule_balance_strength=generation_config.rule_balance_strength,
                 )
 
         to_save.extend(iter_result)

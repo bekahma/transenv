@@ -48,7 +48,7 @@ if [[ -n "${INPUT_CEFR_LEVELS:-}" ]]; then
   INPUT_CEFR_LEVELS_ARG=(--input_cefr_levels "$INPUT_CEFR_LEVELS")
 fi
 
-MAX_RULE_USAGE_RATIO=${MAX_RULE_USAGE_RATIO:-0.20}
+MAX_RULE_USAGE_RATIO=${MAX_RULE_USAGE_RATIO:-none}
 MAX_RULE_USAGE_RATIO_ARG=()
 if [[ -n "$MAX_RULE_USAGE_RATIO" && "$MAX_RULE_USAGE_RATIO" != "none" ]]; then
   MAX_RULE_USAGE_RATIO_ARG=(--max_rule_usage_ratio "$MAX_RULE_USAGE_RATIO")
@@ -61,7 +61,8 @@ fi
 
 MAX_RULES_PER_CHUNK=${MAX_RULES_PER_CHUNK:-1}
 MAX_RULES_PER_ROW=${MAX_RULES_PER_ROW:-2}
-RUN_SUFFIX=${RUN_SUFFIX:-balanced}
+RULE_BALANCE_STRENGTH=${RULE_BALANCE_STRENGTH:-1.0}
+RUN_SUFFIX=${RUN_SUFFIX:-softbalanced}
 
 python src/run/main.py \
   --batch_size 5 \
@@ -73,6 +74,7 @@ python src/run/main.py \
   --max_rules_per_row "$MAX_RULES_PER_ROW" \
   "${MAX_RULE_USAGE_RATIO_ARG[@]}" \
   "${MAX_RULE_APPLICATIONS_PER_RULE_ARG[@]}" \
+  --rule_balance_strength "$RULE_BALANCE_STRENGTH" \
   --save_path ./outputs/cefr_texts/dialect \
   --file_name "${DIALECT_SLUG}_gpt41mini_full_hybrid_${RUN_SUFFIX}" \
   --input_path ./data/cefr_leveled_texts.csv \

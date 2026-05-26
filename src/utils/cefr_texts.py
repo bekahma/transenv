@@ -96,14 +96,26 @@ def aggregate_chunk_results(orig_sentence, chunks, chunk_results):
     mid_transformed_sentences = []
     judge_responses = []
     transformed_sentences = []
+    chunk_records = []
 
-    for result in chunk_results:
+    for idx, result in enumerate(chunk_results):
+        chunk_orig_text = chunks[idx]["text"]
+        chunk_final_text = result.get("final_sentence", chunk_orig_text)
+        chunk_rules = list(result.get("applied_rules", result.get("applied_rule", [])) or [])
+
         whole_responses.extend(result.get("whole_response", []))
         mid_transformed_sentences.extend(result.get("mid_transformed_sentences", []))
         judge_responses.extend(result.get("judge_repsonse", []))
         transformed_sentences.extend(result.get("transformed_sentences", []))
-
-        applied_rules.extend(result.get("applied_rules", result.get("applied_rule", [])))
+        applied_rules.extend(chunk_rules)
+        chunk_records.append({
+            "chunk_index": idx,
+            "orig_text": chunk_orig_text,
+            "transformed_text": chunk_final_text,
+            "applied_rules": chunk_rules,
+            "is_changed": chunk_final_text != chunk_orig_text,
+            "separator": chunks[idx]["separator"],
+        })
 
     return {
         "orig_sentence": _normalize_text(orig_sentence),
@@ -115,6 +127,7 @@ def aggregate_chunk_results(orig_sentence, chunks, chunk_results):
         "final_sentence": final_sentence,
         "chunk_count": len(chunks),
         "chunk_results": chunk_results,
+        "chunks": chunk_records,
     }
 
 
