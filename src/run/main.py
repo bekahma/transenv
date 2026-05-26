@@ -68,7 +68,7 @@ def _load_dataset(*args, **kwargs):
     return load_dataset(*args, **kwargs)
 
 
-def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, rule_usage_counts=None, max_rule_applications_per_rule=None, rule_balance_strength=0.0, openai_parallelism=1):
+def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, openai_parallelism=1):
     results = []
 
     for start_idx in range(0, len(sentences), batch_size):
@@ -82,9 +82,6 @@ def _transform_sentences(sentences, guideline, client, tokenizer, sampling_param
                 task_config,
                 model_config,
                 max_rules_per_chunk=max_rules_per_chunk,
-                rule_usage_counts=rule_usage_counts,
-                max_rule_applications_per_rule=max_rule_applications_per_rule,
-                rule_balance_strength=rule_balance_strength,
                 openai_parallelism=openai_parallelism,
             )
         else:
@@ -97,9 +94,6 @@ def _transform_sentences(sentences, guideline, client, tokenizer, sampling_param
                 task_config,
                 model_config,
                 max_rules_per_chunk=max_rules_per_chunk,
-                rule_usage_counts=rule_usage_counts,
-                max_rule_applications_per_rule=max_rule_applications_per_rule,
-                rule_balance_strength=rule_balance_strength,
             )
         results.extend(batch_results)
 
@@ -168,57 +162,7 @@ def _trim_results_to_row_rule_budget(chunk_results, chunks, max_rules_per_row):
     return trimmed_results
 
 
-def _commit_rule_usage_counts(rule_usage_counts, results):
-    if rule_usage_counts is None:
-        return
-
-    for result in results:
-        rule_usage_counts.update(_get_applied_rules(result))
-
-
-def _trim_results_to_rule_usage_cap(chunk_results, chunks, rule_usage_counts, max_rule_applications_per_rule):
-    if rule_usage_counts is None or max_rule_applications_per_rule is None:
-        return chunk_results
-
-    usage_counts = Counter(rule_usage_counts)
-    trimmed_results = []
-
-    for idx, result in enumerate(chunk_results):
-        rules = _get_applied_rules(result)
-        if not rules:
-            trimmed_results.append(result)
-            continue
-
-        transformed_sentences = result.get("transformed_sentences", [])
-        kept_rules = []
-
-        for rule in rules:
-            if usage_counts.get(rule, 0) >= max_rule_applications_per_rule:
-                break
-            usage_counts[rule] += 1
-            kept_rules.append(rule)
-
-        if len(kept_rules) == len(rules):
-            trimmed_results.append(result)
-            continue
-        if not kept_rules or len(transformed_sentences) < len(kept_rules):
-            trimmed_results.append(empty_transformation_result(chunks[idx]["text"]))
-            continue
-
-        limited_result = dict(result)
-        limited_transformed_sentences = transformed_sentences[:len(kept_rules)]
-        limited_result["applied_rules"] = kept_rules
-        if "applied_rule" in limited_result:
-            limited_result["applied_rule"] = kept_rules
-        limited_result["transformed_sentences"] = limited_transformed_sentences
-        limited_result["final_sentence"] = limited_transformed_sentences[-1]
-        limited_result["rule_usage_cap_truncated"] = True
-        trimmed_results.append(limited_result)
-
-    return trimmed_results
-
-
-def _transform_cefr_chunks_in_parallel_windows(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, rule_usage_counts=None, max_rule_applications_per_rule=None, rule_balance_strength=0.0, openai_parallelism=1):
+def _transform_cefr_chunks_in_parallel_windows(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, openai_parallelism=1):
     chunk_results = []
     remaining_rules = max_rules_per_row
     window_size = max(1, min(batch_size, openai_parallelism))
@@ -234,7 +178,6 @@ def _transform_cefr_chunks_in_parallel_windows(chunks, guideline, client, tokeni
 
         window_chunks = chunks[start_idx:start_idx + window_size]
         chunk_rule_budget = _min_rule_limit(max_rules_per_chunk, remaining_rules)
-        local_rule_usage_counts = Counter(rule_usage_counts) if rule_usage_counts is not None else None
 
         window_results = _transform_sentences(
             [chunk["text"] for chunk in window_chunks],
@@ -247,19 +190,9 @@ def _transform_cefr_chunks_in_parallel_windows(chunks, guideline, client, tokeni
             use_hosted_openai,
             len(window_chunks),
             max_rules_per_chunk=chunk_rule_budget,
-            rule_usage_counts=local_rule_usage_counts,
-            max_rule_applications_per_rule=max_rule_applications_per_rule,
-            rule_balance_strength=rule_balance_strength,
             openai_parallelism=openai_parallelism,
         )
         window_results = _trim_results_to_row_rule_budget(window_results, window_chunks, remaining_rules)
-        window_results = _trim_results_to_rule_usage_cap(
-            window_results,
-            window_chunks,
-            rule_usage_counts,
-            max_rule_applications_per_rule,
-        )
-        _commit_rule_usage_counts(rule_usage_counts, window_results)
 
         remaining_rules -= sum(_count_rule_applications(result) for result in window_results)
         chunk_results.extend(window_results)
@@ -268,7 +201,7 @@ def _transform_cefr_chunks_in_parallel_windows(chunks, guideline, client, tokeni
     return chunk_results
 
 
-def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, rule_usage_counts=None, max_rule_applications_per_rule=None, rule_balance_strength=0.0, openai_parallelism=1):
+def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, openai_parallelism=1):
     chunk_sentences = [chunk["text"] for chunk in chunks]
 
     if max_rules_per_row is None:
@@ -283,9 +216,6 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             use_hosted_openai,
             batch_size,
             max_rules_per_chunk=max_rules_per_chunk,
-            rule_usage_counts=rule_usage_counts,
-            max_rule_applications_per_rule=max_rule_applications_per_rule,
-            rule_balance_strength=rule_balance_strength,
             openai_parallelism=openai_parallelism,
         )
 
@@ -302,9 +232,6 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             batch_size,
             max_rules_per_chunk=max_rules_per_chunk,
             max_rules_per_row=max_rules_per_row,
-            rule_usage_counts=rule_usage_counts,
-            max_rule_applications_per_rule=max_rule_applications_per_rule,
-            rule_balance_strength=rule_balance_strength,
             openai_parallelism=openai_parallelism,
         )
 
@@ -328,9 +255,6 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             use_hosted_openai,
             1,
             max_rules_per_chunk=chunk_rule_budget,
-            rule_usage_counts=rule_usage_counts,
-            max_rule_applications_per_rule=max_rule_applications_per_rule,
-            rule_balance_strength=rule_balance_strength,
             openai_parallelism=openai_parallelism,
         )[0]
         result = _limit_result_to_rule_budget(result, chunk["text"], remaining_rules)
@@ -355,45 +279,6 @@ def _validate_generation_limits(generation_config):
         value = getattr(generation_config, name, None)
         if value is not None and value <= 0:
             raise ValueError(f"--{name} must be greater than 0 when provided")
-
-    rule_cap = getattr(generation_config, "max_rule_applications_per_rule", None)
-    if rule_cap is not None and rule_cap <= 0:
-        raise ValueError("--max_rule_applications_per_rule must be greater than 0 when provided")
-
-    ratio = getattr(generation_config, "max_rule_usage_ratio", None)
-    if ratio is not None and not 0 < ratio <= 1:
-        raise ValueError("--max_rule_usage_ratio must be greater than 0 and less than or equal to 1")
-
-    balance_strength = getattr(generation_config, "rule_balance_strength", None)
-    if balance_strength is not None and balance_strength < 0:
-        raise ValueError("--rule_balance_strength must be greater than or equal to 0")
-
-
-def _count_existing_rule_usage(outputs):
-    counts = Counter()
-    for output in outputs:
-        counts.update(_get_applied_rules(output))
-    return counts
-
-
-def _resolve_rule_usage_cap(generation_config, planned_rows):
-    caps = []
-    explicit_cap = getattr(generation_config, "max_rule_applications_per_rule", None)
-    if explicit_cap is not None:
-        caps.append(explicit_cap)
-
-    usage_ratio = getattr(generation_config, "max_rule_usage_ratio", None)
-    if usage_ratio is not None:
-        per_row_budget = (
-            getattr(generation_config, "max_rules_per_row", None)
-            or getattr(generation_config, "max_rules_per_chunk", None)
-            or 1
-        )
-        caps.append(max(1, int(np.ceil(planned_rows * per_row_budget * usage_ratio))))
-
-    if not caps:
-        return None
-    return min(caps)
 
 
 def _first_nonempty(values):
@@ -468,6 +353,55 @@ def _raise_if_all_model_calls_failed(row_label, output):
     )
 
 
+def _transform_cefr_row_batch(sentences, empty_mask, row_labels, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, generation_config):
+    transformed_batch = [None for _ in range(len(sentences))]
+    active_indices = []
+
+    for idx, value in enumerate(sentences):
+        if empty_mask[idx]:
+            transformed_batch[idx] = empty_transformation_result(value)
+            log(f"cefr_texts row {row_labels[idx]}: empty text; skipped transformation.")
+        else:
+            active_indices.append(idx)
+
+    if not active_indices:
+        return transformed_batch
+
+    row_rule_budget = _min_rule_limit(
+        generation_config.max_rules_per_chunk,
+        generation_config.max_rules_per_row,
+    )
+    batch_start = time.monotonic()
+    log(
+        f"cefr_texts row-chunk batch: transforming {len(active_indices)} rows "
+        f"with up to {len(guideline)} feature checks per row before early stopping."
+    )
+
+    row_results = _transform_sentences(
+        [sentences[idx] for idx in active_indices],
+        guideline,
+        client,
+        tokenizer,
+        sampling_params,
+        task_config,
+        model_config,
+        use_hosted_openai,
+        generation_config.batch_size,
+        max_rules_per_chunk=row_rule_budget,
+        openai_parallelism=generation_config.openai_parallelism,
+    )
+    elapsed_seconds = time.monotonic() - batch_start
+
+    for result_idx, row_idx in enumerate(active_indices):
+        chunk = [{"text": sentences[row_idx], "separator": ""}]
+        output = aggregate_chunk_results(sentences[row_idx], chunk, [row_results[result_idx]])
+        transformed_batch[row_idx] = output
+        _log_cefr_row_summary(row_labels[row_idx], output, elapsed_seconds)
+        _raise_if_all_model_calls_failed(row_labels[row_idx], output)
+
+    return transformed_batch
+
+
 
 def main():
     # Initialize arguments
@@ -514,9 +448,6 @@ def main():
         to_save = resume_dict['question']
         start_idx = len(to_save)
 
-    rule_usage_counts = _count_existing_rule_usage(to_save)
-    max_rule_applications_per_rule = getattr(generation_config, "max_rule_applications_per_rule", None)
-
     # Dataloader
     if dataset_config.dataset_name == 'cefr_texts':
         dataset = load_cefr_text_dataset(
@@ -524,20 +455,13 @@ def main():
             generation_config=generation_config,
             start_idx=start_idx,
         )
-        max_rule_applications_per_rule = _resolve_rule_usage_cap(
-            generation_config,
-            planned_rows=start_idx + len(dataset),
-        )
-        if max_rule_applications_per_rule is not None:
-            log(f'Max feature-rule applications per run: {colorstr(max_rule_applications_per_rule)}')
         log(
             "Generation controls: "
             f"batch_size={generation_config.batch_size}, "
             f"openai_parallelism={generation_config.openai_parallelism}, "
+            f"text_chunking={dataset_config.text_chunking}, "
             f"max_rules_per_chunk={generation_config.max_rules_per_chunk}, "
-            f"max_rules_per_row={generation_config.max_rules_per_row}, "
-            f"max_rule_applications_per_rule={max_rule_applications_per_rule}, "
-            f"rule_balance_strength={generation_config.rule_balance_strength}"
+            f"max_rules_per_row={generation_config.max_rules_per_row}"
         )
         if len(dataset) == 0 and start_idx:
             log(f'No remaining cefr_texts rows to process; saving {len(to_save)} resumed rows.')
@@ -595,10 +519,33 @@ def main():
             sentence = _as_batch_list(sentence)
             empty_mask = _as_batch_list(sample[INTERNAL_EMPTY_TEXT_COLUMN])
             row_indices = _as_batch_list(sample.get(INTERNAL_ROW_INDEX_COLUMN, []))
-            transformed_batch = [None for _ in range(len(sentence))]
+            row_labels = [
+                row_indices[idx] if idx < len(row_indices) else start_idx + len(to_save) + idx
+                for idx in range(len(sentence))
+            ]
+
+            if dataset_config.text_chunking == "row":
+                transformed_batch = _transform_cefr_row_batch(
+                    sentence,
+                    empty_mask,
+                    row_labels,
+                    guideline,
+                    client,
+                    tokenizer,
+                    sampling_params,
+                    task_config,
+                    model_config,
+                    use_hosted_openai,
+                    generation_config,
+                )
+            else:
+                transformed_batch = [None for _ in range(len(sentence))]
 
             for idx, value in enumerate(sentence):
-                row_label = row_indices[idx] if idx < len(row_indices) else start_idx + len(to_save) + idx
+                if transformed_batch[idx] is not None:
+                    continue
+
+                row_label = row_labels[idx]
                 row_start = time.monotonic()
                 if empty_mask[idx]:
                     transformed_batch[idx] = empty_transformation_result(value)
@@ -634,9 +581,6 @@ def main():
                     generation_config.batch_size,
                     max_rules_per_chunk=generation_config.max_rules_per_chunk,
                     max_rules_per_row=generation_config.max_rules_per_row,
-                    rule_usage_counts=rule_usage_counts,
-                    max_rule_applications_per_rule=max_rule_applications_per_rule,
-                    rule_balance_strength=generation_config.rule_balance_strength,
                     openai_parallelism=generation_config.openai_parallelism,
                 )
                 transformed_batch[idx] = aggregate_chunk_results(value, chunks, chunk_results)
@@ -660,9 +604,6 @@ def main():
                     task_config,
                     model_config,
                     max_rules_per_chunk=generation_config.max_rules_per_chunk,
-                    rule_usage_counts=rule_usage_counts,
-                    max_rule_applications_per_rule=max_rule_applications_per_rule,
-                    rule_balance_strength=generation_config.rule_balance_strength,
                     openai_parallelism=generation_config.openai_parallelism,
                 )
             else:
@@ -675,9 +616,6 @@ def main():
                     task_config,
                     model_config,
                     max_rules_per_chunk=generation_config.max_rules_per_chunk,
-                    rule_usage_counts=rule_usage_counts,
-                    max_rule_applications_per_rule=max_rule_applications_per_rule,
-                    rule_balance_strength=generation_config.rule_balance_strength,
                 )
 
         to_save.extend(iter_result)

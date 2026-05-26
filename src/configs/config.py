@@ -12,11 +12,7 @@ class GenerationConfig:
     max_samples: int = field(default=None, metadata={"help": "Maximum number of input rows to transform after filtering"})
     max_rules_per_chunk: int = field(default=None, metadata={"help": "Maximum accepted feature rules per transformed chunk"})
     max_rules_per_row: int = field(default=None, metadata={"help": "Maximum accepted feature-rule applications per cefr_texts row"})
-    max_rule_applications_per_rule: int = field(default=None, metadata={"help": "Maximum accepted applications of any single feature rule across the run"})
-    max_rule_usage_ratio: float = field(default=None, metadata={"help": "For cefr_texts, cap any single feature rule to this share of the planned maximum accepted rule applications"})
-    rule_balance_strength: float = field(default=0.0, metadata={"help": "Soft feature balancing strength; higher values try underused feature rules earlier without forbidding frequent rules"})
     rerun: str = field(default=None)
-    one_transform: bool = field(default=False, metadata={"action": "store_true"})
 
 
 
@@ -38,7 +34,7 @@ class DatasetConfig:
     input_path: str = field(default=None, metadata={"help": "Local CSV input path for cefr_texts"})
     text_column: str = field(default=None, metadata={"help": "Text column in a cefr_texts CSV"})
     input_cefr_levels: str = field(default=None, metadata={"help": "Comma-separated input CEFR levels to keep, e.g. A1,A2"})
-    text_chunking: str = field(default="hybrid", metadata={"help": "cefr_texts chunking mode: hybrid, sentence, or row"})
+    text_chunking: str = field(default="row", metadata={"help": "cefr_texts chunking mode: row, hybrid, or sentence"})
     max_chunk_words: int = field(default=80, metadata={"help": "Split sentence chunks longer than this many words"})
     sentence_chunk_min_words: int = field(default=100, metadata={"help": "Use sentence chunks only above this row word count when text_chunking=hybrid"})
 

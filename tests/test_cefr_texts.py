@@ -3,7 +3,6 @@ import os
 import sys
 import tempfile
 import unittest
-from collections import Counter
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -366,7 +365,6 @@ Line two."""
             {"text": "Three.", "separator": ""},
         ]
         calls = []
-        rule_usage_counts = Counter()
 
         def fake_transform(sentences, *args, **kwargs):
             calls.append((list(sentences), kwargs["max_rules_per_chunk"], kwargs["openai_parallelism"]))
@@ -396,7 +394,6 @@ Line two."""
                 batch_size=5,
                 max_rules_per_chunk=1,
                 max_rules_per_row=2,
-                rule_usage_counts=rule_usage_counts,
                 openai_parallelism=2,
             )
 
@@ -404,16 +401,12 @@ Line two."""
         self.assertEqual(results[0]["applied_rules"], ["rule:One."])
         self.assertEqual(results[1]["applied_rules"], ["rule:Two."])
         self.assertEqual(results[2]["final_sentence"], "Three.")
-        self.assertEqual(rule_usage_counts, Counter({"rule:One.": 1, "rule:Two.": 1}))
 
-    def test_parallel_chunk_window_respects_rule_usage_cap(self):
-        chunks = [
-            {"text": "One.", "separator": " "},
-            {"text": "Two.", "separator": ""},
-        ]
-        rule_usage_counts = Counter()
+    def test_row_chunk_batch_transforms_rows_together(self):
+        calls = []
 
         def fake_transform(sentences, *args, **kwargs):
+            calls.append((list(sentences), kwargs["max_rules_per_chunk"], kwargs["openai_parallelism"]))
             return [
                 {
                     "orig_sentence": text,
@@ -421,15 +414,24 @@ Line two."""
                     "whole_response": [],
                     "mid_transformed_sentences": [],
                     "judge_repsonse": [],
-                    "applied_rules": ["shared-rule"],
+                    "applied_rules": [f"rule:{text}"],
                     "transformed_sentences": [f"{text} changed"],
                 }
                 for text in sentences
             ]
 
+        config = SimpleNamespace(
+            batch_size=5,
+            max_rules_per_chunk=2,
+            max_rules_per_row=1,
+            openai_parallelism=3,
+        )
+
         with patch.object(run_main, "_transform_sentences", side_effect=fake_transform):
-            results = run_main._transform_cefr_chunks(
-                chunks,
+            outputs = run_main._transform_cefr_row_batch(
+                ["One.", "Two.", ""],
+                [False, False, True],
+                [10, 11, 12],
                 guideline=[],
                 client=None,
                 tokenizer=None,
@@ -437,18 +439,13 @@ Line two."""
                 task_config=None,
                 model_config=None,
                 use_hosted_openai=True,
-                batch_size=5,
-                max_rules_per_chunk=1,
-                max_rules_per_row=2,
-                rule_usage_counts=rule_usage_counts,
-                max_rule_applications_per_rule=1,
-                openai_parallelism=2,
+                generation_config=config,
             )
 
-        self.assertEqual(results[0]["applied_rules"], ["shared-rule"])
-        self.assertEqual(results[1]["applied_rules"], [])
-        self.assertEqual(results[1]["final_sentence"], "Two.")
-        self.assertEqual(rule_usage_counts, Counter({"shared-rule": 1}))
+        self.assertEqual(calls, [(["One.", "Two."], 1, 3)])
+        self.assertEqual(outputs[0]["final_sentence"], "One. changed")
+        self.assertEqual(outputs[1]["applied_rules"], ["rule:Two."])
+        self.assertEqual(outputs[2]["final_sentence"], "")
 
     def test_generation_limits_reject_zero_rule_budgets(self):
         config = SimpleNamespace(
@@ -457,9 +454,6 @@ Line two."""
             max_samples=None,
             max_rules_per_chunk=0,
             max_rules_per_row=None,
-            max_rule_applications_per_rule=None,
-            max_rule_usage_ratio=None,
-            rule_balance_strength=0,
         )
 
         with self.assertRaisesRegex(ValueError, "max_rules_per_chunk"):
@@ -471,11 +465,6 @@ Line two."""
             run_main._validate_generation_limits(config)
 
         config.max_rules_per_row = None
-        config.max_rule_applications_per_rule = 0
-        with self.assertRaisesRegex(ValueError, "max_rule_applications_per_rule"):
-            run_main._validate_generation_limits(config)
-
-        config.max_rule_applications_per_rule = None
         config.openai_parallelism = 0
         with self.assertRaisesRegex(ValueError, "openai_parallelism"):
             run_main._validate_generation_limits(config)

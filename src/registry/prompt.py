@@ -83,27 +83,3 @@ def semantic_check(sentence1, sentence2):
     Sentence 2: {sentence2}
     Answer:
     """
-
-
-
-
-"""
-### Steps to Follow:
-    1. **Identification Phase**: 
-    - Answer the identification questions for the linguistic feature with either "yes" or "no."
-    - Answer the questions in a very strict manner leaving no room for potential.
-    - Proceed to the next step only if **all** answers are "yes."
-    - Otherwise, stop in identification phase with generating '**Transformed Sentence:** (No change)'.
-    
-    2. **Actionable Changes**: 
-    - Make only the **necessary changes** to apply the linguistic feature, ensuring no loss of information.
-    - Provide the final transformed sentence, adhering strictly to the format and structure of the given example.
-
-"""
-"""
-    ### Consideration
-    - Keywords from sentence 1 should be in sentence 2.
-    - Important information in sentence 1 should all be in sentence 2.
-    - Sentence 1 and sentence 2 have the same sentence structure (no different negation).
-    - Overall structures of sentence 1 and sentence 2 are identical.
-"""
