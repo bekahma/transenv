@@ -16,7 +16,11 @@ module load StdEnv/2023
 module load python/3.11
 module load gcc arrow
 
-export OPENAI_API_KEY=$(cat ~/chatgpt_api.key)
+# export OPENAI_API_KEY=$(cat ~/chatgpt_api.key)
+
+set -a
+source .env
+set +a
 
 source venv/bin/activate
 
