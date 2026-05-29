@@ -2,9 +2,12 @@ import os
 import json
 import numpy as np
 import pandas as pd
+from collections import Counter
 
 from registry.dataset_map import  DATASET_MAPPING
 from utils.cefr_texts import DIAGNOSTIC_COUNT_KEYS, load_cefr_text_frame
+from utils.cefr_filter import write_caa_pair_files, parse_rule_list
+from utils import log
 
 
 
@@ -51,7 +54,24 @@ def _first_nonempty(values):
     return ""
 
 
-def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
+def _config_json(config):
+    if config is None:
+        return "{}"
+    if hasattr(config, "__dataclass_fields__"):
+        values = {key: getattr(config, key) for key in config.__dataclass_fields__}
+    else:
+        values = dict(vars(config))
+    return json.dumps(values, sort_keys=True, ensure_ascii=False)
+
+
+def _rule_distribution(values):
+    counts = Counter()
+    for value in values:
+        counts.update(parse_rule_list(value))
+    return counts
+
+
+def return_cefr_texts(to_save, save_config, dataset_config, generation_config, task_config=None, model_config=None):
     rerun_index = None
     if generation_config.rerun is not None:
         rerun_index = list(np.load(generation_config.rerun))
@@ -59,6 +79,10 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
     source_df = load_cefr_text_frame(dataset_config, rerun_index)
     outputs = to_save.get('question', [])
     source_df = source_df.iloc[:len(outputs)].copy()
+    if '__transenv_row_idx' in source_df.columns:
+        source_df['source_row_idx'] = source_df['__transenv_row_idx']
+    else:
+        source_df['source_row_idx'] = source_df.index
 
     orig_sentences = []
     transformed_texts = []
@@ -123,7 +147,35 @@ def return_cefr_texts(to_save, save_config, dataset_config, generation_config):
         source_df = source_df.drop(columns=['__transenv_row_idx'])
 
     suffix = '_rerun' if generation_config.rerun is not None else ''
-    source_df.to_csv(os.path.join(save_config.save_path, f'{save_config.file_name}{suffix}.csv'), index=False)
+    raw_path = os.path.join(save_config.save_path, f'{save_config.file_name}{suffix}.csv')
+    source_df.to_csv(raw_path, index=False)
+
+    if getattr(generation_config, "write_caa_pairs", False):
+        dialect = getattr(task_config, "dialect", "") if task_config is not None else ""
+        transform_model = getattr(model_config, "model_name", "") if model_config is not None else ""
+        semantic_model = ""
+        if model_config is not None:
+            semantic_model = getattr(model_config, "semantic_model_name", None) or transform_model
+        result = write_caa_pair_files(
+            source_df,
+            output_dir=save_config.save_path,
+            file_prefix=f'{save_config.file_name}{suffix}',
+            dialect=dialect,
+            transform_model=transform_model,
+            semantic_model=semantic_model,
+            generation_config_json=_config_json(generation_config),
+            max_edit_rate=getattr(generation_config, "caa_max_edit_rate", 0.50),
+            min_length_ratio=getattr(generation_config, "caa_min_length_ratio", 0.50),
+            max_length_ratio=getattr(generation_config, "caa_max_length_ratio", 1.80),
+        )
+        rule_counts = _rule_distribution(source_df[source_df['is_changed']]['applied_rules'])
+        top_rules = ", ".join(f"{rule}:{count}" for rule, count in rule_counts.most_common(8)) or "<none>"
+        log(
+            "CAA pair export: "
+            f"raw_rows={len(source_df)}, accepted_pairs={result['kept_rows']}, "
+            f"dropped_rows={result['dropped_rows']}, top_rules={top_rules}, "
+            f"pairs_path={result['pairs_path']}"
+        )
 
 
 

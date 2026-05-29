@@ -12,7 +12,7 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from utils.cefr_filter import filter_cefr_csv, filter_cefr_dataframe
+from utils.cefr_filter import filter_cefr_csv, filter_cefr_dataframe, write_caa_pair_files
 
 
 def make_text(prefix, count=30):
@@ -116,6 +116,68 @@ class CefrFilterTest(unittest.TestCase):
         self.assertEqual(len(dropped), 1)
         self.assertIn("transformed_text", audit.columns)
         self.assertIn("transformed_text_filtered", audit.columns)
+
+    def test_caa_pair_export_keeps_multi_rule_pairs_and_drops_failures(self):
+        df = pd.DataFrame(
+            [
+                {
+                    "source_row_idx": 10,
+                    "label": "A2",
+                    "orig_sentence": "I like those apples every day.",
+                    "transformed_text": "I likes them apples every day.",
+                    "applied_rules": json.dumps(["SUBJECT VERB AGREEMENT", "THEM INSTEAD OF THOSE"]),
+                    "num_applied_rules": 2,
+                    "is_changed": True,
+                    "model_error_count": 0,
+                    "semantic_error_count": 0,
+                    "model_response_count": 2,
+                    "semantic_judge_count": 2,
+                },
+                {
+                    "source_row_idx": 11,
+                    "label": "A2",
+                    "orig_sentence": "This row did not change.",
+                    "transformed_text": "This row did not change.",
+                    "applied_rules": json.dumps([]),
+                    "num_applied_rules": 0,
+                    "is_changed": False,
+                    "model_error_count": 0,
+                    "semantic_error_count": 0,
+                },
+                {
+                    "source_row_idx": 12,
+                    "label": "A2",
+                    "orig_sentence": "This row has a model failure.",
+                    "transformed_text": "This row has a model failure.",
+                    "applied_rules": json.dumps(["SOME RULE"]),
+                    "num_applied_rules": 1,
+                    "is_changed": True,
+                    "model_error_count": 1,
+                    "semantic_error_count": 0,
+                },
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            result = write_caa_pair_files(
+                df,
+                output_dir=tmp_dir,
+                file_prefix="aave",
+                dialect="Urban African American Vernacular English",
+                transform_model="gpt-4.1-mini",
+                semantic_model="gpt-4.1-mini",
+                generation_config_json='{"max_rules_per_row": 3}',
+            )
+            pairs = pd.read_csv(result["pairs_path"])
+            audit = pd.read_csv(result["audit_path"])
+
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs.loc[0, "pair_id"], "urban_african_american_vernacular_english:10")
+        self.assertEqual(pairs.loc[0, "source_row_idx"], 10)
+        self.assertEqual(json.loads(pairs.loc[0, "applied_rules"]), ["SUBJECT VERB AGREEMENT", "THEM INSTEAD OF THOSE"])
+        self.assertEqual(pairs.loc[0, "num_applied_rules"], 2)
+        self.assertIn("unchanged_or_no_applied_rules", audit.loc[1, "filter_reasons"])
+        self.assertIn("model_errors", audit.loc[2, "filter_reasons"])
 
 
 if __name__ == "__main__":

@@ -29,9 +29,9 @@ def exponential_backoff(retry_count:int,
 
 
 
-def save_func(to_save, save_config, dataset_config, generation_config, task_config):
+def save_func(to_save, save_config, dataset_config, generation_config, task_config, model_config=None):
     if dataset_config.dataset_name == 'cefr_texts':
-        return return_cefr_texts(to_save, save_config, dataset_config, generation_config)
+        return return_cefr_texts(to_save, save_config, dataset_config, generation_config, task_config, model_config)
 
     save_mapping = {
         'mmlu': return_mmlu,

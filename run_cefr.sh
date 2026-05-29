@@ -49,14 +49,19 @@ if [[ -n "${INPUT_CEFR_LEVELS:-}" && "$INPUT_CEFR_LEVELS" != "none" ]]; then
   INPUT_CEFR_LEVELS_ARG=(--input_cefr_levels "$INPUT_CEFR_LEVELS")
 fi
 
-MAX_RULES_PER_CHUNK=${MAX_RULES_PER_CHUNK:-2}
-MAX_RULES_PER_ROW=${MAX_RULES_PER_ROW:-2}
+MAX_RULES_PER_CHUNK=${MAX_RULES_PER_CHUNK:-3}
+MAX_RULES_PER_ROW=${MAX_RULES_PER_ROW:-3}
 OPENAI_PARALLELISM=${OPENAI_PARALLELISM:-2}
 TEXT_CHUNKING=${TEXT_CHUNKING:-row}
 SENTENCE_CHUNK_MIN_WORDS=${SENTENCE_CHUNK_MIN_WORDS:-100}
 MAX_CHUNK_WORDS=${MAX_CHUNK_WORDS:-80}
 RUN_SUFFIX=${RUN_SUFFIX:-a1a2_probe}
 FILE_NAME="${DIALECT_SLUG}_gpt41mini_${TEXT_CHUNKING}_${RUN_SUFFIX}"
+WRITE_CAA_PAIRS=${WRITE_CAA_PAIRS:-1}
+WRITE_CAA_PAIRS_ARG=()
+if [[ "$WRITE_CAA_PAIRS" != "0" && "$WRITE_CAA_PAIRS" != "false" && "$WRITE_CAA_PAIRS" != "False" ]]; then
+  WRITE_CAA_PAIRS_ARG=(--write_caa_pairs)
+fi
 
 echo "Dialect: $DIALECT"
 echo "File suffix: $RUN_SUFFIX"
@@ -69,6 +74,7 @@ echo "OPENAI_PARALLELISM: $OPENAI_PARALLELISM"
 echo "TEXT_CHUNKING: $TEXT_CHUNKING"
 echo "SENTENCE_CHUNK_MIN_WORDS: $SENTENCE_CHUNK_MIN_WORDS"
 echo "MAX_CHUNK_WORDS: $MAX_CHUNK_WORDS"
+echo "WRITE_CAA_PAIRS: $WRITE_CAA_PAIRS"
 
 python src/run/main.py \
   --batch_size 5 \
@@ -78,6 +84,7 @@ python src/run/main.py \
   --max_chunk_words "$MAX_CHUNK_WORDS" \
   --max_rules_per_chunk "$MAX_RULES_PER_CHUNK" \
   --max_rules_per_row "$MAX_RULES_PER_ROW" \
+  "${WRITE_CAA_PAIRS_ARG[@]}" \
   --openai_parallelism "$OPENAI_PARALLELISM" \
   --save_path ./outputs/cefr_texts/dialect \
   --file_name "$FILE_NAME" \

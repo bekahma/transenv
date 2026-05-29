@@ -314,6 +314,15 @@ def _summarize_outputs(outputs):
     return summary
 
 
+def _format_rule_counts(outputs, limit=8):
+    counts = Counter()
+    for output in outputs:
+        counts.update(_get_applied_rules(output))
+    if not counts:
+        return "<none>"
+    return ", ".join(f"{rule}:{count}" for rule, count in counts.most_common(limit))
+
+
 def _log_cefr_row_summary(row_label, output, elapsed_seconds):
     summary = _summarize_outputs([output])
     message = (
@@ -373,8 +382,9 @@ def _transform_cefr_row_batch(sentences, empty_mask, row_labels, guideline, clie
     )
     batch_start = time.monotonic()
     log(
-        f"cefr_texts row-chunk batch: transforming {len(active_indices)} rows "
-        f"with up to {len(guideline)} feature checks per row before early stopping."
+        f"cefr_texts row-chunk batch: rows_sent_to_api={len(active_indices)}, "
+        f"max_accepted_rules_per_row={row_rule_budget}, "
+        f"feature_checks_per_row={len(guideline)} before early stopping."
     )
 
     row_results = _transform_sentences(
@@ -455,6 +465,7 @@ def main():
             generation_config=generation_config,
             start_idx=start_idx,
         )
+        log(f'Loaded {colorstr(len(dataset))} cefr_texts rows after filtering/resume.')
         log(
             "Generation controls: "
             f"batch_size={generation_config.batch_size}, "
@@ -466,7 +477,7 @@ def main():
         if len(dataset) == 0 and start_idx:
             log(f'No remaining cefr_texts rows to process; saving {len(to_save)} resumed rows.')
             to_save_dict = {'question': to_save}
-            save_func(to_save_dict, save_config, dataset_config, generation_config, task_config)
+            save_func(to_save_dict, save_config, dataset_config, generation_config, task_config, model_config)
             return
         dataloader = _batch_dataset(dataset, generation_config.batch_size)
 
@@ -623,10 +634,12 @@ def main():
         log(
             f"Batch {it + 1} complete in {time.monotonic() - batch_start:.1f}s: "
             f"rows={batch_summary['rows']}, changed_rows={batch_summary['changed_rows']}, "
+            f"no_change_rows={batch_summary['rows'] - batch_summary['changed_rows']}, "
             f"accepted_rules={batch_summary['applied_rules']}, responses={batch_summary['model_response_count']}, "
             f"candidates={batch_summary['candidate_transform_count']}, semantic_checks={batch_summary['semantic_judge_count']}, "
             f"model_errors={batch_summary['model_error_count']}, no_change={batch_summary['no_change_response_count']}, "
-            f"parse_failures={batch_summary['parse_failure_count']}"
+            f"parse_failures={batch_summary['parse_failure_count']}, "
+            f"top_rules={_format_rule_counts(iter_result)}"
         )
 
         if dataset_config.dataset_name in choice_transform_dataset:
@@ -649,7 +662,7 @@ def main():
         elif generation_config.rerun is not None:
             pickle_save(os.path.join(save_config.save_path, f'{save_config.file_name}_rerun.pk'), to_save_dict)
         
-        save_func(to_save_dict, save_config, dataset_config, generation_config, task_config)        
+        save_func(to_save_dict, save_config, dataset_config, generation_config, task_config, model_config)
 
 
 

@@ -12,6 +12,10 @@ class GenerationConfig:
     max_samples: int = field(default=None, metadata={"help": "Maximum number of input rows to transform after filtering"})
     max_rules_per_chunk: int = field(default=None, metadata={"help": "Maximum accepted feature rules per transformed chunk"})
     max_rules_per_row: int = field(default=None, metadata={"help": "Maximum accepted feature-rule applications per cefr_texts row"})
+    write_caa_pairs: bool = field(default=False, metadata={"help": "Write filtered CAA-ready SAE/dialect pair CSVs for cefr_texts"})
+    caa_max_edit_rate: float = field(default=0.50, metadata={"help": "Maximum word edit rate for CAA pair export"})
+    caa_min_length_ratio: float = field(default=0.50, metadata={"help": "Minimum transformed/original character ratio for CAA pair export"})
+    caa_max_length_ratio: float = field(default=1.80, metadata={"help": "Maximum transformed/original character ratio for CAA pair export"})
     rerun: str = field(default=None)
 
 

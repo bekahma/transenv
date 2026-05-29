@@ -169,6 +169,12 @@ Line two."""
         self.assertGreater(len(chunks), 1)
         self.assertEqual(chunks[-1]["text"], "Next sentence.")
 
+    def test_row_chunking_keeps_long_rows_whole(self):
+        text = " ".join(["word"] * 250) + ". Next sentence."
+        chunks = split_text_chunks(text, mode="row", sentence_chunk_min_words=100, max_chunk_words=20)
+
+        self.assertEqual(chunks, [{"text": text, "separator": ""}])
+
     def test_detects_newly_introduced_blank(self):
         self.assertTrue(introduces_blank("This is fine.", "This is <blank>."))
         self.assertFalse(introduces_blank("This is <blank>.", "This is <blank>."))
@@ -447,6 +453,19 @@ Line two."""
         self.assertEqual(outputs[1]["applied_rules"], ["rule:Two."])
         self.assertEqual(outputs[2]["final_sentence"], "")
 
+    def test_three_rule_budget_trims_extra_applications(self):
+        result = {
+            "final_sentence": "fourth",
+            "applied_rules": ["R1", "R2", "R3", "R4"],
+            "transformed_sentences": ["first", "second", "third", "fourth"],
+        }
+
+        trimmed = run_main._limit_result_to_rule_budget(result, "original", max_rules=3)
+
+        self.assertEqual(trimmed["applied_rules"], ["R1", "R2", "R3"])
+        self.assertEqual(trimmed["final_sentence"], "third")
+        self.assertTrue(trimmed["rule_limit_truncated"])
+
     def test_generation_limits_reject_zero_rule_budgets(self):
         config = SimpleNamespace(
             batch_size=1,
@@ -580,7 +599,9 @@ Line two."""
         self.assertIn("sample_model_error", saved.columns)
         self.assertIn("sample_semantic_error", saved.columns)
         self.assertIn("sample_model_response", saved.columns)
+        self.assertIn("source_row_idx", saved.columns)
         self.assertEqual(saved.loc[0, "transformed_text"], "I likes apples.")
+        self.assertEqual(saved.loc[0, "source_row_idx"], 0)
         self.assertEqual(json.loads(saved.loc[0, "applied_rules"]), ["SUBJECT VERB AGREEMENT"])
         self.assertEqual(saved.loc[0, "num_applied_rules"], 1)
         self.assertTrue(bool(saved.loc[0, "is_changed"]))
@@ -605,6 +626,66 @@ Line two."""
         )
         self.assertFalse(bool(saved.loc[1, "is_changed"]))
         self.assertEqual(saved.loc[1, "changed_chunk_count"], 0)
+
+    def test_writes_caa_pair_export_when_enabled(self):
+        config = dataset_config(
+            os.path.join(FIXTURE_DIR, "cefr_texts_levels.csv"),
+            text_column="text",
+            input_cefr_levels="A1,A2",
+        )
+        gen_config = SimpleNamespace(
+            batch_size=2,
+            rerun=None,
+            max_samples=None,
+            write_caa_pairs=True,
+            caa_max_edit_rate=0.50,
+            caa_min_length_ratio=0.50,
+            caa_max_length_ratio=1.80,
+        )
+        task_config = SimpleNamespace(dialect="Urban African American Vernacular English")
+        model_config = SimpleNamespace(model_name="gpt-4.1-mini", semantic_model_name=None)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            save_config = SimpleNamespace(save_path=tmp_dir, file_name="aave_row")
+            outputs = {
+                "question": [
+                    {
+                        "orig_sentence": "I like those apples every day.",
+                        "final_sentence": "I likes them apples every day.",
+                        "whole_response": ["response"],
+                        "mid_transformed_sentences": ["I likes them apples every day."],
+                        "judge_repsonse": ["no"],
+                        "model_errors": [],
+                        "semantic_errors": [],
+                        "model_error_count": 0,
+                        "semantic_error_count": 0,
+                        "no_change_response_count": 0,
+                        "parse_failure_count": 0,
+                        "blank_rejection_count": 0,
+                        "semantic_rejection_count": 0,
+                        "applied_rules": ["SUBJECT VERB AGREEMENT", "THEM INSTEAD OF THOSE"],
+                        "transformed_sentences": ["I likes those apples every day.", "I likes them apples every day."],
+                    },
+                    {
+                        "orig_sentence": "The train arrived late.",
+                        "final_sentence": "The train arrived late.",
+                        "applied_rules": [],
+                    },
+                ]
+            }
+
+            return_cefr_texts(outputs, save_config, config, gen_config, task_config, model_config)
+            pairs = pd.read_csv(os.path.join(tmp_dir, "aave_row_caa_pairs.csv"))
+            audit = pd.read_csv(os.path.join(tmp_dir, "aave_row_caa_filter_audit.csv"))
+
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs.loc[0, "source_row_idx"], 0)
+        self.assertEqual(pairs.loc[0, "dialect"], "Urban African American Vernacular English")
+        self.assertEqual(pairs.loc[0, "transform_model"], "gpt-4.1-mini")
+        self.assertEqual(json.loads(pairs.loc[0, "applied_rules"]), ["SUBJECT VERB AGREEMENT", "THEM INSTEAD OF THOSE"])
+        self.assertEqual(pairs.loc[0, "num_applied_rules"], 2)
+        self.assertIn("generation_config_json", pairs.columns)
+        self.assertEqual(len(audit), 2)
 
 
 if __name__ == "__main__":
