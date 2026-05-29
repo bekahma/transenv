@@ -524,6 +524,76 @@ Line two."""
                     model_config,
                 )
 
+    def test_hosted_transformation_can_use_openai_batch_api(self):
+        class FakeFiles:
+            def __init__(self):
+                self.contents = {}
+                self.next_file = 0
+
+            def create(self, file, purpose):
+                self.next_file += 1
+                return SimpleNamespace(id=f"file-input-{self.next_file}")
+
+            def content(self, file_id):
+                return SimpleNamespace(text=self.contents[file_id])
+
+        class FakeBatches:
+            def __init__(self, files):
+                self.files = files
+                self.next_batch = 0
+
+            def create(self, input_file_id, endpoint, completion_window):
+                self.next_batch += 1
+                batch_id = f"batch-{self.next_batch}"
+                output_file_id = f"file-output-{self.next_batch}"
+                if self.next_batch == 1:
+                    response = "**Transformed Sentence:** She a teacher."
+                    custom_id = "transform:0:0:row:0"
+                else:
+                    response = "no"
+                    custom_id = "semantic:0:0:row:0"
+                self.files.contents[output_file_id] = json.dumps({
+                    "custom_id": custom_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {"choices": [{"message": {"content": response}}]},
+                    },
+                    "error": None,
+                }) + "\n"
+                return SimpleNamespace(id=batch_id, status="completed", output_file_id=output_file_id, error_file_id=None)
+
+            def retrieve(self, batch_id):
+                raise AssertionError("completed fake batches should not be polled")
+
+        files = FakeFiles()
+        client = SimpleNamespace(files=files, batches=FakeBatches(files))
+        task_config = SimpleNamespace(task_name="english_dialect")
+        model_config = SimpleNamespace(model_name="gpt-4.1-mini", semantic_model_name=None)
+        sampling_params = {"temperature": 0.8, "top_p": 0.95, "max_tokens": 20}
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch.object(
+                transformation_module,
+                "openai_framework_application",
+                return_value=[{"role": "system", "content": "system"}],
+            ):
+                output = transformation_module.openai_transformation(
+                    ["She is a teacher."],
+                    [("Deletion of copula be: before NPs", "unused")],
+                    client,
+                    sampling_params,
+                    task_config,
+                    model_config,
+                    max_rules_per_chunk=1,
+                    openai_call_mode="batch",
+                    openai_batch_output_dir=tmp_dir,
+                    openai_batch_poll_interval=1,
+                )[0]
+
+        self.assertEqual(output["final_sentence"], "She a teacher.")
+        self.assertEqual(output["applied_rules"], ["Deletion of copula be: before NPs"])
+        self.assertEqual(output["judge_repsonse"], ["no"])
+
     def test_saves_appended_audit_columns(self):
         config = dataset_config(
             os.path.join(FIXTURE_DIR, "cefr_texts_levels.csv"),

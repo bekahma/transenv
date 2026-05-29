@@ -53,6 +53,10 @@ MAX_SAMPLES=20 RUN_SUFFIX=smoke20 sbatch --array=0 run_cefr.sh
 # Full A1/A2 probe for all three configured dialects.
 RUN_SUFFIX=a1a2_row sbatch --array=0-2 run_cefr.sh
 
+# Full A1/A2 probe with OpenAI Batch API calls for lower API cost.
+# Leave OPENAI_CALL_MODE unset, or set it to sync, for regular smoke tests.
+OPENAI_CALL_MODE=batch RUN_SUFFIX=a1a2_row_batch sbatch --array=0-2 run_cefr.sh
+
 # Equivalent direct command for one dialect without Slurm.
 python src/run/main.py --batch_size 5 --openai_parallelism 2 --max_samples 20 --text_chunking row --max_rules_per_chunk 3 --max_rules_per_row 3 --write_caa_pairs --save_path ./outputs/cefr_texts/dialect --file_name aave_gpt41mini_row_smoke20 --input_path ./data/cefr_leveled_texts.csv --text_column text --input_cefr_levels A1,A2 --dialect "Urban African American Vernacular English" --task_name english_dialect --data_path ./ --dataset_name cefr_texts --model_provider openai --model_name gpt-4.1-mini
 

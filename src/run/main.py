@@ -68,7 +68,7 @@ def _load_dataset(*args, **kwargs):
     return load_dataset(*args, **kwargs)
 
 
-def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, openai_parallelism=1):
+def _transform_sentences(sentences, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, openai_parallelism=1, generation_config=None):
     results = []
 
     for start_idx in range(0, len(sentences), batch_size):
@@ -83,6 +83,9 @@ def _transform_sentences(sentences, guideline, client, tokenizer, sampling_param
                 model_config,
                 max_rules_per_chunk=max_rules_per_chunk,
                 openai_parallelism=openai_parallelism,
+                openai_call_mode=getattr(generation_config, "openai_call_mode", "sync"),
+                openai_batch_output_dir=getattr(generation_config, "openai_batch_output_dir", None),
+                openai_batch_poll_interval=getattr(generation_config, "openai_batch_poll_interval", 60),
             )
         else:
             batch_results = transformation(
@@ -162,7 +165,7 @@ def _trim_results_to_row_rule_budget(chunk_results, chunks, max_rules_per_row):
     return trimmed_results
 
 
-def _transform_cefr_chunks_in_parallel_windows(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, openai_parallelism=1):
+def _transform_cefr_chunks_in_parallel_windows(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, openai_parallelism=1, generation_config=None):
     chunk_results = []
     remaining_rules = max_rules_per_row
     window_size = max(1, min(batch_size, openai_parallelism))
@@ -191,6 +194,7 @@ def _transform_cefr_chunks_in_parallel_windows(chunks, guideline, client, tokeni
             len(window_chunks),
             max_rules_per_chunk=chunk_rule_budget,
             openai_parallelism=openai_parallelism,
+            generation_config=generation_config,
         )
         window_results = _trim_results_to_row_rule_budget(window_results, window_chunks, remaining_rules)
 
@@ -201,7 +205,7 @@ def _transform_cefr_chunks_in_parallel_windows(chunks, guideline, client, tokeni
     return chunk_results
 
 
-def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, openai_parallelism=1):
+def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params, task_config, model_config, use_hosted_openai, batch_size, max_rules_per_chunk=None, max_rules_per_row=None, openai_parallelism=1, generation_config=None):
     chunk_sentences = [chunk["text"] for chunk in chunks]
 
     if max_rules_per_row is None:
@@ -217,6 +221,7 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             batch_size,
             max_rules_per_chunk=max_rules_per_chunk,
             openai_parallelism=openai_parallelism,
+            generation_config=generation_config,
         )
 
     if use_hosted_openai and openai_parallelism is not None and openai_parallelism > 1:
@@ -233,6 +238,7 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             max_rules_per_chunk=max_rules_per_chunk,
             max_rules_per_row=max_rules_per_row,
             openai_parallelism=openai_parallelism,
+            generation_config=generation_config,
         )
 
     chunk_results = []
@@ -256,6 +262,7 @@ def _transform_cefr_chunks(chunks, guideline, client, tokenizer, sampling_params
             1,
             max_rules_per_chunk=chunk_rule_budget,
             openai_parallelism=openai_parallelism,
+            generation_config=generation_config,
         )[0]
         result = _limit_result_to_rule_budget(result, chunk["text"], remaining_rules)
         remaining_rules -= _count_rule_applications(result)
@@ -270,6 +277,12 @@ def _validate_generation_limits(generation_config):
 
     if getattr(generation_config, "openai_parallelism", 1) <= 0:
         raise ValueError("--openai_parallelism must be greater than 0")
+
+    if getattr(generation_config, "openai_call_mode", "sync") not in ("sync", "batch"):
+        raise ValueError("--openai_call_mode must be either 'sync' or 'batch'")
+
+    if getattr(generation_config, "openai_batch_poll_interval", 60) <= 0:
+        raise ValueError("--openai_batch_poll_interval must be greater than 0")
 
     max_samples = getattr(generation_config, "max_samples", None)
     if max_samples is not None and max_samples < 0:
@@ -399,6 +412,7 @@ def _transform_cefr_row_batch(sentences, empty_mask, row_labels, guideline, clie
         generation_config.batch_size,
         max_rules_per_chunk=row_rule_budget,
         openai_parallelism=generation_config.openai_parallelism,
+        generation_config=generation_config,
     )
     elapsed_seconds = time.monotonic() - batch_start
 
@@ -417,6 +431,8 @@ def main():
     # Initialize arguments
     generation_config, model_config, dataset_config, task_config, save_config = parse_args()
     _validate_generation_limits(generation_config)
+    if generation_config.openai_batch_output_dir is None:
+        generation_config.openai_batch_output_dir = os.path.join(save_config.save_path, "_openai_batch")
 
     if dataset_config.dataset_name is None:
         raise AssertionError(colorstr('red', 'Dataset name should be specified!'))
@@ -470,6 +486,7 @@ def main():
             "Generation controls: "
             f"batch_size={generation_config.batch_size}, "
             f"openai_parallelism={generation_config.openai_parallelism}, "
+            f"openai_call_mode={generation_config.openai_call_mode}, "
             f"text_chunking={dataset_config.text_chunking}, "
             f"max_rules_per_chunk={generation_config.max_rules_per_chunk}, "
             f"max_rules_per_row={generation_config.max_rules_per_row}"
@@ -593,6 +610,7 @@ def main():
                     max_rules_per_chunk=generation_config.max_rules_per_chunk,
                     max_rules_per_row=generation_config.max_rules_per_row,
                     openai_parallelism=generation_config.openai_parallelism,
+                    generation_config=generation_config,
                 )
                 transformed_batch[idx] = aggregate_chunk_results(value, chunks, chunk_results)
                 _log_cefr_row_summary(row_label, transformed_batch[idx], time.monotonic() - row_start)
@@ -616,6 +634,9 @@ def main():
                     model_config,
                     max_rules_per_chunk=generation_config.max_rules_per_chunk,
                     openai_parallelism=generation_config.openai_parallelism,
+                    openai_call_mode=generation_config.openai_call_mode,
+                    openai_batch_output_dir=generation_config.openai_batch_output_dir,
+                    openai_batch_poll_interval=generation_config.openai_batch_poll_interval,
                 )
             else:
                 iter_result = transformation(
